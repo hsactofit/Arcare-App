@@ -1,0 +1,146 @@
+{
+  "project_info": {
+    "project_number": "133235672969",
+    "project_id": "arham-01",
+    "storage_bucket": "arham-01.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:133235672969:android:ffe2b7584657a07a578358",
+        "android_client_info": {
+          "package_name": "com.actofit.arhamsecure"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "133235672969-jgjifanem47qb6gg97psddnok8s7h8kl.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.actofit.arhamsecure",
+            "certificate_hash": "8be97a6a0875fa80a092780a77446c89a8c23c89"
+          }
+        },
+        {
+          "client_id": "133235672969-pujcj04s4hjmf1qk8uh5pmd1a79388da.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.actofit.arhamsecure",
+            "certificate_hash": "d8eb894aa55f1e949828930403bee5729b8688eb"
+          }
+        },
+        {
+          "client_id": "133235672969-qp76b3oi0r9puf1hr266atltb57ivrq5.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.actofit.arhamsecure",
+            "certificate_hash": "ede88f061b1995a284540753326ae28a3fede2f9"
+          }
+        },
+        {
+          "client_id": "133235672969-t8p62o3fglg7f6o08icik445lmr0boqb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.actofit.arhamsecure",
+            "certificate_hash": "c89cdf23a064be26cc00646f59e38f757236520a"
+          }
+        },
+        {
+          "client_id": "133235672969-vac74if5dlats75d64vjc9rf0ufg8e5n.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.actofit.arhamsecure",
+            "certificate_hash": "02f5d014337eea6c41ae0a3546e6f6c0f5dd541d"
+          }
+        },
+        {
+          "client_id": "133235672969-vv42tu676c591bdq2ld6m3ivd777eogt.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.actofit.arhamsecure",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "133235672969-tam6tkijvkiv0jt9i379rvm9mgfsn531.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBF6OoeyJJJq-Clj4fgXvesMEG6Dchgljg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "133235672969-tam6tkijvkiv0jt9i379rvm9mgfsn531.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "133235672969-3cvj022rjtsdorajcjtilmt8v4hsutb1.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.actofit.arhamSecure"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:133235672969:android:59a3a9cad3911140578358",
+        "android_client_info": {
+          "package_name": "com.ocavior.arham_secure"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "133235672969-fe19milq99ojcimhj104563lla5cdsc6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ocavior.arham_secure",
+            "certificate_hash": "c89cdf23a064be26cc00646f59e38f757236520a"
+          }
+        },
+        {
+          "client_id": "133235672969-qsvh4ddc05l7bq7ee8afodvvnthukf3v.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ocavior.arham_secure",
+            "certificate_hash": "ede88f061b1995a284540753326ae28a3fede2f9"
+          }
+        },
+        {
+          "client_id": "133235672969-tam6tkijvkiv0jt9i379rvm9mgfsn531.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBF6OoeyJJJq-Clj4fgXvesMEG6Dchgljg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "133235672969-tam6tkijvkiv0jt9i379rvm9mgfsn531.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "133235672969-3cvj022rjtsdorajcjtilmt8v4hsutb1.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.actofit.arhamSecure"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

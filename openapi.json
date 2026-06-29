@@ -1,0 +1,1190 @@
+﻿{
+    "openapi":  "3.1.0",
+    "info":  {
+                 "title":  "Arcar Wellness Backend",
+                 "description":  "Backend API for Atham Wellness Mobile Application Onboarding \u0026 Dashboard Sync.",
+                 "version":  "1.0.0"
+             },
+    "paths":  {
+                  "/api/auth/signup":  {
+                                           "post":  {
+                                                        "tags":  [
+                                                                     "Authentication"
+                                                                 ],
+                                                        "summary":  "Signup",
+                                                        "description":  "Registers a new email/password user, hashes their password,\nand returns JWT access/refresh tokens alongside basic user profile data.",
+                                                        "operationId":  "signup_api_auth_signup_post",
+                                                        "requestBody":  {
+                                                                            "content":  {
+                                                                                            "application/json":  {
+                                                                                                                     "schema":  {
+                                                                                                                                    "$ref":  "#/components/schemas/UserSignUp"
+                                                                                                                                }
+                                                                                                                 }
+                                                                                        },
+                                                                            "required":  true
+                                                                        },
+                                                        "responses":  {
+                                                                          "201":  {
+                                                                                      "description":  "Successful Response",
+                                                                                      "content":  {
+                                                                                                      "application/json":  {
+                                                                                                                               "schema":  {
+                                                                                                                                              "$ref":  "#/components/schemas/AuthResponse"
+                                                                                                                                          }
+                                                                                                                           }
+                                                                                                  }
+                                                                                  },
+                                                                          "422":  {
+                                                                                      "description":  "Validation Error",
+                                                                                      "content":  {
+                                                                                                      "application/json":  {
+                                                                                                                               "schema":  {
+                                                                                                                                              "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                          }
+                                                                                                                           }
+                                                                                                  }
+                                                                                  }
+                                                                      }
+                                                    }
+                                       },
+                  "/api/auth/login":  {
+                                          "post":  {
+                                                       "tags":  [
+                                                                    "Authentication"
+                                                                ],
+                                                       "summary":  "Login",
+                                                       "description":  "Authenticates a user via email and password,\nreturning JWT access/refresh tokens alongside basic user profile data.",
+                                                       "operationId":  "login_api_auth_login_post",
+                                                       "requestBody":  {
+                                                                           "content":  {
+                                                                                           "application/json":  {
+                                                                                                                    "schema":  {
+                                                                                                                                   "$ref":  "#/components/schemas/UserLogin"
+                                                                                                                               }
+                                                                                                                }
+                                                                                       },
+                                                                           "required":  true
+                                                                       },
+                                                       "responses":  {
+                                                                         "200":  {
+                                                                                     "description":  "Successful Response",
+                                                                                     "content":  {
+                                                                                                     "application/json":  {
+                                                                                                                              "schema":  {
+                                                                                                                                             "$ref":  "#/components/schemas/AuthResponse"
+                                                                                                                                         }
+                                                                                                                          }
+                                                                                                 }
+                                                                                 },
+                                                                         "422":  {
+                                                                                     "description":  "Validation Error",
+                                                                                     "content":  {
+                                                                                                     "application/json":  {
+                                                                                                                              "schema":  {
+                                                                                                                                             "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                         }
+                                                                                                                          }
+                                                                                                 }
+                                                                                 }
+                                                                     }
+                                                   }
+                                      },
+                  "/api/auth/social-signup":  {
+                                                  "post":  {
+                                                               "tags":  [
+                                                                            "Authentication"
+                                                                        ],
+                                                               "summary":  "Social Signup",
+                                                               "description":  "Unified social auth endpoint (registers if not exists, otherwise logs in).\n\n**Deprecated**: Prefer using `/social-login` directly, which handles both registration and login.",
+                                                               "operationId":  "social_signup_api_auth_social_signup_post",
+                                                               "requestBody":  {
+                                                                                   "content":  {
+                                                                                                   "application/json":  {
+                                                                                                                            "schema":  {
+                                                                                                                                           "$ref":  "#/components/schemas/SocialSignUpRequest"
+                                                                                                                                       }
+                                                                                                                        }
+                                                                                               },
+                                                                                   "required":  true
+                                                                               },
+                                                               "responses":  {
+                                                                                 "201":  {
+                                                                                             "description":  "Successful Response",
+                                                                                             "content":  {
+                                                                                                             "application/json":  {
+                                                                                                                                      "schema":  {
+                                                                                                                                                     "$ref":  "#/components/schemas/AuthResponse"
+                                                                                                                                                 }
+                                                                                                                                  }
+                                                                                                         }
+                                                                                         },
+                                                                                 "422":  {
+                                                                                             "description":  "Validation Error",
+                                                                                             "content":  {
+                                                                                                             "application/json":  {
+                                                                                                                                      "schema":  {
+                                                                                                                                                     "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                                 }
+                                                                                                                                  }
+                                                                                                         }
+                                                                                         }
+                                                                             },
+                                                               "deprecated":  true
+                                                           }
+                                              },
+                  "/api/auth/social-login":  {
+                                                 "post":  {
+                                                              "tags":  [
+                                                                           "Authentication"
+                                                                       ],
+                                                              "summary":  "Unified Social Login and Registration",
+                                                              "description":  "Authenticates or registers a user using their Google or Apple ID/Access token.\n\n**Unified Flow**:\n- **If the user does not exist**: Automatically registers (signs up) the user and returns the JWT access/refresh tokens.\n- **If the user already exists**: Logs them in, updates their profile name if it changed, and returns the tokens.",
+                                                              "operationId":  "social_login_api_auth_social_login_post",
+                                                              "requestBody":  {
+                                                                                  "content":  {
+                                                                                                  "application/json":  {
+                                                                                                                           "schema":  {
+                                                                                                                                          "$ref":  "#/components/schemas/SocialLoginRequest"
+                                                                                                                                      }
+                                                                                                                       }
+                                                                                              },
+                                                                                  "required":  true
+                                                                              },
+                                                              "responses":  {
+                                                                                "200":  {
+                                                                                            "description":  "Successful Response",
+                                                                                            "content":  {
+                                                                                                            "application/json":  {
+                                                                                                                                     "schema":  {
+                                                                                                                                                    "$ref":  "#/components/schemas/AuthResponse"
+                                                                                                                                                }
+                                                                                                                                 }
+                                                                                                        }
+                                                                                        },
+                                                                                "422":  {
+                                                                                            "description":  "Validation Error",
+                                                                                            "content":  {
+                                                                                                            "application/json":  {
+                                                                                                                                     "schema":  {
+                                                                                                                                                    "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                                }
+                                                                                                                                 }
+                                                                                                        }
+                                                                                        }
+                                                                            }
+                                                          }
+                                             },
+                  "/api/auth/refresh":  {
+                                            "post":  {
+                                                         "tags":  [
+                                                                      "Authentication"
+                                                                  ],
+                                                         "summary":  "Refresh Tokens",
+                                                         "description":  "Validates a JWT refresh token and issues a new access token\nalong with updated user details.",
+                                                         "operationId":  "refresh_tokens_api_auth_refresh_post",
+                                                         "requestBody":  {
+                                                                             "content":  {
+                                                                                             "application/json":  {
+                                                                                                                      "schema":  {
+                                                                                                                                     "$ref":  "#/components/schemas/TokenRefreshRequest"
+                                                                                                                                 }
+                                                                                                                  }
+                                                                                         },
+                                                                             "required":  true
+                                                                         },
+                                                         "responses":  {
+                                                                           "200":  {
+                                                                                       "description":  "Successful Response",
+                                                                                       "content":  {
+                                                                                                       "application/json":  {
+                                                                                                                                "schema":  {
+                                                                                                                                               "$ref":  "#/components/schemas/AuthResponse"
+                                                                                                                                           }
+                                                                                                                            }
+                                                                                                   }
+                                                                                   },
+                                                                           "422":  {
+                                                                                       "description":  "Validation Error",
+                                                                                       "content":  {
+                                                                                                       "application/json":  {
+                                                                                                                                "schema":  {
+                                                                                                                                               "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                           }
+                                                                                                                            }
+                                                                                                   }
+                                                                                   }
+                                                                       }
+                                                     }
+                                        },
+                  "/api/onboarding":  {
+                                          "post":  {
+                                                       "tags":  [
+                                                                    "Onboarding"
+                                                                ],
+                                                       "summary":  "Submit Onboarding",
+                                                       "description":  "Submits user onboarding flow details.\nIf the user already exists, it updates their onboarding data.",
+                                                       "operationId":  "submit_onboarding_api_onboarding_post",
+                                                       "requestBody":  {
+                                                                           "content":  {
+                                                                                           "application/json":  {
+                                                                                                                    "schema":  {
+                                                                                                                                   "$ref":  "#/components/schemas/OnboardingSubmission"
+                                                                                                                               }
+                                                                                                                }
+                                                                                       },
+                                                                           "required":  true
+                                                                       },
+                                                       "responses":  {
+                                                                         "201":  {
+                                                                                     "description":  "Successful Response",
+                                                                                     "content":  {
+                                                                                                     "application/json":  {
+                                                                                                                              "schema":  {
+                                                                                                                                             "$ref":  "#/components/schemas/MessageResponse"
+                                                                                                                                         }
+                                                                                                                          }
+                                                                                                 }
+                                                                                 },
+                                                                         "422":  {
+                                                                                     "description":  "Validation Error",
+                                                                                     "content":  {
+                                                                                                     "application/json":  {
+                                                                                                                              "schema":  {
+                                                                                                                                             "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                         }
+                                                                                                                          }
+                                                                                                 }
+                                                                                 }
+                                                                     }
+                                                   }
+                                      },
+                  "/api/onboarding/{email}":  {
+                                                  "get":  {
+                                                              "tags":  [
+                                                                           "Onboarding"
+                                                                       ],
+                                                              "summary":  "Get Onboarding Details",
+                                                              "description":  "Fetches full onboarding details for a user by email.",
+                                                              "operationId":  "get_onboarding_details_api_onboarding__email__get",
+                                                              "parameters":  [
+                                                                                 {
+                                                                                     "name":  "email",
+                                                                                     "in":  "path",
+                                                                                     "required":  true,
+                                                                                     "schema":  {
+                                                                                                    "type":  "string",
+                                                                                                    "title":  "Email"
+                                                                                                }
+                                                                                 }
+                                                                             ],
+                                                              "responses":  {
+                                                                                "200":  {
+                                                                                            "description":  "Successful Response",
+                                                                                            "content":  {
+                                                                                                            "application/json":  {
+                                                                                                                                     "schema":  {
+                                                                                                                                                    "$ref":  "#/components/schemas/OnboardingSubmission"
+                                                                                                                                                }
+                                                                                                                                 }
+                                                                                                        }
+                                                                                        },
+                                                                                "422":  {
+                                                                                            "description":  "Validation Error",
+                                                                                            "content":  {
+                                                                                                            "application/json":  {
+                                                                                                                                     "schema":  {
+                                                                                                                                                    "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                                }
+                                                                                                                                 }
+                                                                                                        }
+                                                                                        }
+                                                                            }
+                                                          }
+                                              },
+                  "/api/onboarding/status/{email}":  {
+                                                         "get":  {
+                                                                     "tags":  [
+                                                                                  "Onboarding"
+                                                                              ],
+                                                                     "summary":  "Check Onboarding Status",
+                                                                     "description":  "Checks if onboarding has been completed for a given user email.",
+                                                                     "operationId":  "check_onboarding_status_api_onboarding_status__email__get",
+                                                                     "parameters":  [
+                                                                                        {
+                                                                                            "name":  "email",
+                                                                                            "in":  "path",
+                                                                                            "required":  true,
+                                                                                            "schema":  {
+                                                                                                           "type":  "string",
+                                                                                                           "title":  "Email"
+                                                                                                       }
+                                                                                        }
+                                                                                    ],
+                                                                     "responses":  {
+                                                                                       "200":  {
+                                                                                                   "description":  "Successful Response",
+                                                                                                   "content":  {
+                                                                                                                   "application/json":  {
+                                                                                                                                            "schema":  {
+
+                                                                                                                                                       }
+                                                                                                                                        }
+                                                                                                               }
+                                                                                               },
+                                                                                       "422":  {
+                                                                                                   "description":  "Validation Error",
+                                                                                                   "content":  {
+                                                                                                                   "application/json":  {
+                                                                                                                                            "schema":  {
+                                                                                                                                                           "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                                       }
+                                                                                                                                        }
+                                                                                                               }
+                                                                                               }
+                                                                                   }
+                                                                 }
+                                                     },
+                  "/api/health/sync/{email}":  {
+                                                   "post":  {
+                                                                "tags":  [
+                                                                             "Health Sync"
+                                                                         ],
+                                                                "summary":  "Sync Health Data",
+                                                                "description":  "Syncs health data (steps, calories, sleep duration, water, workouts, heart rate) for a user.\nRequires the user\u0027s email.",
+                                                                "operationId":  "sync_health_data_api_health_sync__email__post",
+                                                                "parameters":  [
+                                                                                   {
+                                                                                       "name":  "email",
+                                                                                       "in":  "path",
+                                                                                       "required":  true,
+                                                                                       "schema":  {
+                                                                                                      "type":  "string",
+                                                                                                      "title":  "Email"
+                                                                                                  }
+                                                                                   }
+                                                                               ],
+                                                                "requestBody":  {
+                                                                                    "required":  true,
+                                                                                    "content":  {
+                                                                                                    "application/json":  {
+                                                                                                                             "schema":  {
+                                                                                                                                            "$ref":  "#/components/schemas/HealthDataSync"
+                                                                                                                                        }
+                                                                                                                         }
+                                                                                                }
+                                                                                },
+                                                                "responses":  {
+                                                                                  "200":  {
+                                                                                              "description":  "Successful Response",
+                                                                                              "content":  {
+                                                                                                              "application/json":  {
+                                                                                                                                       "schema":  {
+                                                                                                                                                      "$ref":  "#/components/schemas/HealthDataResponse"
+                                                                                                                                                  }
+                                                                                                                                   }
+                                                                                                          }
+                                                                                          },
+                                                                                  "422":  {
+                                                                                              "description":  "Validation Error",
+                                                                                              "content":  {
+                                                                                                              "application/json":  {
+                                                                                                                                       "schema":  {
+                                                                                                                                                      "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                                  }
+                                                                                                                                   }
+                                                                                                          }
+                                                                                          }
+                                                                              }
+                                                            }
+                                               },
+                  "/api/health/data/{email}":  {
+                                                   "get":  {
+                                                               "tags":  [
+                                                                            "Health Sync"
+                                                                        ],
+                                                               "summary":  "Get Health Data",
+                                                               "description":  "Fetches the synced health data details for a user.",
+                                                               "operationId":  "get_health_data_api_health_data__email__get",
+                                                               "parameters":  [
+                                                                                  {
+                                                                                      "name":  "email",
+                                                                                      "in":  "path",
+                                                                                      "required":  true,
+                                                                                      "schema":  {
+                                                                                                     "type":  "string",
+                                                                                                     "title":  "Email"
+                                                                                                 }
+                                                                                  }
+                                                                              ],
+                                                               "responses":  {
+                                                                                 "200":  {
+                                                                                             "description":  "Successful Response",
+                                                                                             "content":  {
+                                                                                                             "application/json":  {
+                                                                                                                                      "schema":  {
+                                                                                                                                                     "$ref":  "#/components/schemas/HealthDataResponse"
+                                                                                                                                                 }
+                                                                                                                                  }
+                                                                                                         }
+                                                                                         },
+                                                                                 "422":  {
+                                                                                             "description":  "Validation Error",
+                                                                                             "content":  {
+                                                                                                             "application/json":  {
+                                                                                                                                      "schema":  {
+                                                                                                                                                     "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                                 }
+                                                                                                                                  }
+                                                                                                         }
+                                                                                         }
+                                                                             }
+                                                           }
+                                               },
+                  "/api/dashboard/{email}":  {
+                                                 "get":  {
+                                                             "tags":  [
+                                                                          "Dashboard"
+                                                                      ],
+                                                             "summary":  "Get Dashboard Data",
+                                                             "description":  "Retrieves dynamic dashboard details, widgets, wellness score, and customized tips\nfor the user based on their profile, goals, and synchronized health data.",
+                                                             "operationId":  "get_dashboard_data_api_dashboard__email__get",
+                                                             "parameters":  [
+                                                                                {
+                                                                                    "name":  "email",
+                                                                                    "in":  "path",
+                                                                                    "required":  true,
+                                                                                    "schema":  {
+                                                                                                   "type":  "string",
+                                                                                                   "title":  "Email"
+                                                                                               }
+                                                                                }
+                                                                            ],
+                                                             "responses":  {
+                                                                               "200":  {
+                                                                                           "description":  "Successful Response",
+                                                                                           "content":  {
+                                                                                                           "application/json":  {
+                                                                                                                                    "schema":  {
+                                                                                                                                                   "$ref":  "#/components/schemas/DashboardResponse"
+                                                                                                                                               }
+                                                                                                                                }
+                                                                                                       }
+                                                                                       },
+                                                                               "422":  {
+                                                                                           "description":  "Validation Error",
+                                                                                           "content":  {
+                                                                                                           "application/json":  {
+                                                                                                                                    "schema":  {
+                                                                                                                                                   "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                               }
+                                                                                                                                }
+                                                                                                       }
+                                                                                       }
+                                                                           }
+                                                         }
+                                             },
+                  "/":  {
+                            "get":  {
+                                        "tags":  [
+                                                     "Root"
+                                                 ],
+                                        "summary":  "Read Root",
+                                        "operationId":  "read_root__get",
+                                        "responses":  {
+                                                          "200":  {
+                                                                      "description":  "Successful Response",
+                                                                      "content":  {
+                                                                                      "application/json":  {
+                                                                                                               "schema":  {
+
+                                                                                                                          }
+                                                                                                           }
+                                                                                  }
+                                                                  }
+                                                      }
+                                    }
+                        }
+              },
+    "components":  {
+                       "schemas":  {
+                                       "AuthResponse":  {
+                                                            "properties":  {
+                                                                               "access_token":  {
+                                                                                                    "type":  "string",
+                                                                                                    "title":  "Access Token"
+                                                                                                },
+                                                                               "refresh_token":  {
+                                                                                                     "type":  "string",
+                                                                                                     "title":  "Refresh Token"
+                                                                                                 },
+                                                                               "token_type":  {
+                                                                                                  "type":  "string",
+                                                                                                  "title":  "Token Type",
+                                                                                                  "default":  "bearer"
+                                                                                              },
+                                                                               "user":  {
+                                                                                            "$ref":  "#/components/schemas/UserDetailResponse"
+                                                                                        }
+                                                                           },
+                                                            "type":  "object",
+                                                            "required":  [
+                                                                             "access_token",
+                                                                             "refresh_token",
+                                                                             "user"
+                                                                         ],
+                                                            "title":  "AuthResponse"
+                                                        },
+                                       "AuthSchema":  {
+                                                          "properties":  {
+                                                                             "name":  {
+                                                                                          "type":  "string",
+                                                                                          "title":  "Name",
+                                                                                          "description":  "Full Name of the user"
+                                                                                      },
+                                                                             "email":  {
+                                                                                           "type":  "string",
+                                                                                           "format":  "email",
+                                                                                           "title":  "Email",
+                                                                                           "description":  "Email address of the user"
+                                                                                       },
+                                                                             "provider":  {
+                                                                                              "type":  "string",
+                                                                                              "title":  "Provider",
+                                                                                              "description":  "Auth provider (e.g., google, apple, email)",
+                                                                                              "default":  "google"
+                                                                                          }
+                                                                         },
+                                                          "type":  "object",
+                                                          "required":  [
+                                                                           "name",
+                                                                           "email"
+                                                                       ],
+                                                          "title":  "AuthSchema"
+                                                      },
+                                       "DashboardResponse":  {
+                                                                 "properties":  {
+                                                                                    "wellness_score":  {
+                                                                                                           "type":  "integer",
+                                                                                                           "title":  "Wellness Score"
+                                                                                                       },
+                                                                                    "daily_summary":  {
+                                                                                                          "type":  "string",
+                                                                                                          "title":  "Daily Summary"
+                                                                                                      },
+                                                                                    "recommendations":  {
+                                                                                                            "items":  {
+                                                                                                                          "type":  "string"
+                                                                                                                      },
+                                                                                                            "type":  "array",
+                                                                                                            "title":  "Recommendations"
+                                                                                                        },
+                                                                                    "widgets":  {
+                                                                                                    "items":  {
+                                                                                                                  "$ref":  "#/components/schemas/DashboardWidget"
+                                                                                                              },
+                                                                                                    "type":  "array",
+                                                                                                    "title":  "Widgets"
+                                                                                                }
+                                                                                },
+                                                                 "type":  "object",
+                                                                 "required":  [
+                                                                                  "wellness_score",
+                                                                                  "daily_summary",
+                                                                                  "recommendations",
+                                                                                  "widgets"
+                                                                              ],
+                                                                 "title":  "DashboardResponse"
+                                                             },
+                                       "DashboardWidget":  {
+                                                               "properties":  {
+                                                                                  "title":  {
+                                                                                                "type":  "string",
+                                                                                                "title":  "Title"
+                                                                                            },
+                                                                                  "value":  {
+                                                                                                "type":  "string",
+                                                                                                "title":  "Value"
+                                                                                            },
+                                                                                  "target":  {
+                                                                                                 "anyOf":  [
+                                                                                                               {
+                                                                                                                   "type":  "string"
+                                                                                                               },
+                                                                                                               {
+                                                                                                                   "type":  "null"
+                                                                                                               }
+                                                                                                           ],
+                                                                                                 "title":  "Target"
+                                                                                             },
+                                                                                  "unit":  {
+                                                                                               "anyOf":  [
+                                                                                                             {
+                                                                                                                 "type":  "string"
+                                                                                                             },
+                                                                                                             {
+                                                                                                                 "type":  "null"
+                                                                                                             }
+                                                                                                         ],
+                                                                                               "title":  "Unit"
+                                                                                           },
+                                                                                  "status":  {
+                                                                                                 "anyOf":  [
+                                                                                                               {
+                                                                                                                   "type":  "string"
+                                                                                                               },
+                                                                                                               {
+                                                                                                                   "type":  "null"
+                                                                                                               }
+                                                                                                           ],
+                                                                                                 "title":  "Status"
+                                                                                             }
+                                                                              },
+                                                               "type":  "object",
+                                                               "required":  [
+                                                                                "title",
+                                                                                "value"
+                                                                            ],
+                                                               "title":  "DashboardWidget"
+                                                           },
+                                       "HTTPValidationError":  {
+                                                                   "properties":  {
+                                                                                      "detail":  {
+                                                                                                     "items":  {
+                                                                                                                   "$ref":  "#/components/schemas/ValidationError"
+                                                                                                               },
+                                                                                                     "type":  "array",
+                                                                                                     "title":  "Detail"
+                                                                                                 }
+                                                                                  },
+                                                                   "type":  "object",
+                                                                   "title":  "HTTPValidationError"
+                                                               },
+                                       "HealthDataResponse":  {
+                                                                  "properties":  {
+                                                                                     "steps":  {
+                                                                                                   "type":  "integer",
+                                                                                                   "title":  "Steps"
+                                                                                               },
+                                                                                     "calories":  {
+                                                                                                      "type":  "integer",
+                                                                                                      "title":  "Calories"
+                                                                                                  },
+                                                                                     "sleep_duration_hours":  {
+                                                                                                                  "type":  "number",
+                                                                                                                  "title":  "Sleep Duration Hours"
+                                                                                                              },
+                                                                                     "water_intake_ml":  {
+                                                                                                             "type":  "integer",
+                                                                                                             "title":  "Water Intake Ml"
+                                                                                                         },
+                                                                                     "workouts_count":  {
+                                                                                                            "type":  "integer",
+                                                                                                            "title":  "Workouts Count"
+                                                                                                        },
+                                                                                     "heart_rate_bpm":  {
+                                                                                                            "type":  "integer",
+                                                                                                            "title":  "Heart Rate Bpm"
+                                                                                                        },
+                                                                                     "updated_at":  {
+                                                                                                        "type":  "string",
+                                                                                                        "format":  "date-time",
+                                                                                                        "title":  "Updated At"
+                                                                                                    }
+                                                                                 },
+                                                                  "type":  "object",
+                                                                  "required":  [
+                                                                                   "steps",
+                                                                                   "calories",
+                                                                                   "sleep_duration_hours",
+                                                                                   "water_intake_ml",
+                                                                                   "workouts_count",
+                                                                                   "heart_rate_bpm",
+                                                                                   "updated_at"
+                                                                               ],
+                                                                  "title":  "HealthDataResponse"
+                                                              },
+                                       "HealthDataSync":  {
+                                                              "properties":  {
+                                                                                 "steps":  {
+                                                                                               "anyOf":  [
+                                                                                                             {
+                                                                                                                 "type":  "integer"
+                                                                                                             },
+                                                                                                             {
+                                                                                                                 "type":  "null"
+                                                                                                             }
+                                                                                                         ],
+                                                                                               "title":  "Steps"
+                                                                                           },
+                                                                                 "calories":  {
+                                                                                                  "anyOf":  [
+                                                                                                                {
+                                                                                                                    "type":  "integer"
+                                                                                                                },
+                                                                                                                {
+                                                                                                                    "type":  "null"
+                                                                                                                }
+                                                                                                            ],
+                                                                                                  "title":  "Calories"
+                                                                                              },
+                                                                                 "sleep_duration_hours":  {
+                                                                                                              "anyOf":  [
+                                                                                                                            {
+                                                                                                                                "type":  "number"
+                                                                                                                            },
+                                                                                                                            {
+                                                                                                                                "type":  "null"
+                                                                                                                            }
+                                                                                                                        ],
+                                                                                                              "title":  "Sleep Duration Hours"
+                                                                                                          },
+                                                                                 "water_intake_ml":  {
+                                                                                                         "anyOf":  [
+                                                                                                                       {
+                                                                                                                           "type":  "integer"
+                                                                                                                       },
+                                                                                                                       {
+                                                                                                                           "type":  "null"
+                                                                                                                       }
+                                                                                                                   ],
+                                                                                                         "title":  "Water Intake Ml"
+                                                                                                     },
+                                                                                 "workouts_count":  {
+                                                                                                        "anyOf":  [
+                                                                                                                      {
+                                                                                                                          "type":  "integer"
+                                                                                                                      },
+                                                                                                                      {
+                                                                                                                          "type":  "null"
+                                                                                                                      }
+                                                                                                                  ],
+                                                                                                        "title":  "Workouts Count"
+                                                                                                    },
+                                                                                 "heart_rate_bpm":  {
+                                                                                                        "anyOf":  [
+                                                                                                                      {
+                                                                                                                          "type":  "integer"
+                                                                                                                      },
+                                                                                                                      {
+                                                                                                                          "type":  "null"
+                                                                                                                      }
+                                                                                                                  ],
+                                                                                                        "title":  "Heart Rate Bpm"
+                                                                                                    }
+                                                                             },
+                                                              "type":  "object",
+                                                              "title":  "HealthDataSync"
+                                                          },
+                                       "MessageResponse":  {
+                                                               "properties":  {
+                                                                                  "message":  {
+                                                                                                  "type":  "string",
+                                                                                                  "title":  "Message"
+                                                                                              }
+                                                                              },
+                                                               "type":  "object",
+                                                               "required":  [
+                                                                                "message"
+                                                                            ],
+                                                               "title":  "MessageResponse"
+                                                           },
+                                       "NotificationPermissionSchema":  {
+                                                                            "properties":  {
+                                                                                               "ai_tips":  {
+                                                                                                               "type":  "boolean",
+                                                                                                               "title":  "Ai Tips",
+                                                                                                               "default":  true
+                                                                                                           },
+                                                                                               "rewards":  {
+                                                                                                               "type":  "boolean",
+                                                                                                               "title":  "Rewards",
+                                                                                                               "default":  false
+                                                                                                           },
+                                                                                               "daily_reminder":  {
+                                                                                                                      "type":  "boolean",
+                                                                                                                      "title":  "Daily Reminder",
+                                                                                                                      "default":  true
+                                                                                                                  },
+                                                                                               "sleep_reminder":  {
+                                                                                                                      "type":  "boolean",
+                                                                                                                      "title":  "Sleep Reminder",
+                                                                                                                      "default":  true
+                                                                                                                  },
+                                                                                               "activity_reminder":  {
+                                                                                                                         "type":  "boolean",
+                                                                                                                         "title":  "Activity Reminder",
+                                                                                                                         "default":  true
+                                                                                                                     },
+                                                                                               "challenge_updates":  {
+                                                                                                                         "type":  "boolean",
+                                                                                                                         "title":  "Challenge Updates",
+                                                                                                                         "default":  false
+                                                                                                                     },
+                                                                                               "hydration_reminder":  {
+                                                                                                                          "type":  "boolean",
+                                                                                                                          "title":  "Hydration Reminder",
+                                                                                                                          "default":  true
+                                                                                                                      }
+                                                                                           },
+                                                                            "type":  "object",
+                                                                            "title":  "NotificationPermissionSchema"
+                                                                        },
+                                       "OnboardingSubmission":  {
+                                                                    "properties":  {
+                                                                                       "auth":  {
+                                                                                                    "$ref":  "#/components/schemas/AuthSchema"
+                                                                                                },
+                                                                                       "goals":  {
+                                                                                                     "items":  {
+                                                                                                                   "type":  "string"
+                                                                                                               },
+                                                                                                     "type":  "array",
+                                                                                                     "title":  "Goals"
+                                                                                                 },
+                                                                                       "profile":  {
+                                                                                                       "$ref":  "#/components/schemas/ProfileSchema"
+                                                                                                   },
+                                                                                       "permissions":  {
+                                                                                                           "$ref":  "#/components/schemas/PermissionsSchema"
+                                                                                                       },
+                                                                                       "completed_at":  {
+                                                                                                            "type":  "string",
+                                                                                                            "format":  "date-time",
+                                                                                                            "title":  "Completed At"
+                                                                                                        },
+                                                                                       "onboarding_completed":  {
+                                                                                                                    "type":  "boolean",
+                                                                                                                    "title":  "Onboarding Completed",
+                                                                                                                    "default":  true
+                                                                                                                }
+                                                                                   },
+                                                                    "type":  "object",
+                                                                    "required":  [
+                                                                                     "auth",
+                                                                                     "profile",
+                                                                                     "permissions",
+                                                                                     "completed_at"
+                                                                                 ],
+                                                                    "title":  "OnboardingSubmission"
+                                                                },
+                                       "PermissionsSchema":  {
+                                                                 "properties":  {
+                                                                                    "notifications":  {
+                                                                                                          "$ref":  "#/components/schemas/NotificationPermissionSchema"
+                                                                                                      },
+                                                                                    "health_connect_connected":  {
+                                                                                                                     "type":  "boolean",
+                                                                                                                     "title":  "Health Connect Connected",
+                                                                                                                     "default":  false
+                                                                                                                 }
+                                                                                },
+                                                                 "type":  "object",
+                                                                 "required":  [
+                                                                                  "notifications"
+                                                                              ],
+                                                                 "title":  "PermissionsSchema"
+                                                             },
+                                       "ProfileSchema":  {
+                                                             "properties":  {
+                                                                                "dob":  {
+                                                                                            "type":  "string",
+                                                                                            "format":  "date",
+                                                                                            "title":  "Dob",
+                                                                                            "description":  "Date of birth"
+                                                                                        },
+                                                                                "gender":  {
+                                                                                               "type":  "string",
+                                                                                               "title":  "Gender",
+                                                                                               "description":  "Gender"
+                                                                                           },
+                                                                                "height":  {
+                                                                                               "anyOf":  [
+                                                                                                             {
+                                                                                                                 "type":  "number"
+                                                                                                             },
+                                                                                                             {
+                                                                                                                 "type":  "null"
+                                                                                                             }
+                                                                                                         ],
+                                                                                               "title":  "Height",
+                                                                                               "description":  "Height in cm"
+                                                                                           },
+                                                                                "weight":  {
+                                                                                               "anyOf":  [
+                                                                                                             {
+                                                                                                                 "type":  "number"
+                                                                                                             },
+                                                                                                             {
+                                                                                                                 "type":  "null"
+                                                                                                             }
+                                                                                                         ],
+                                                                                               "title":  "Weight",
+                                                                                               "description":  "Weight in kg"
+                                                                                           }
+                                                                            },
+                                                             "type":  "object",
+                                                             "required":  [
+                                                                              "dob",
+                                                                              "gender"
+                                                                          ],
+                                                             "title":  "ProfileSchema"
+                                                         },
+                                       "SocialLoginRequest":  {
+                                                                  "properties":  {
+                                                                                     "provider":  {
+                                                                                                      "type":  "string",
+                                                                                                      "title":  "Provider",
+                                                                                                      "description":  "google or apple"
+                                                                                                  },
+                                                                                     "token":  {
+                                                                                                   "type":  "string",
+                                                                                                   "title":  "Token",
+                                                                                                   "description":  "ID Token or Identity Token from the OAuth provider"
+                                                                                               },
+                                                                                     "name":  {
+                                                                                                  "anyOf":  [
+                                                                                                                {
+                                                                                                                    "type":  "string"
+                                                                                                                },
+                                                                                                                {
+                                                                                                                    "type":  "null"
+                                                                                                                }
+                                                                                                            ],
+                                                                                                  "title":  "Name",
+                                                                                                  "description":  "Optional user name if not included in the token (mostly Apple signups)"
+                                                                                              }
+                                                                                 },
+                                                                  "type":  "object",
+                                                                  "required":  [
+                                                                                   "provider",
+                                                                                   "token"
+                                                                               ],
+                                                                  "title":  "SocialLoginRequest"
+                                                              },
+                                       "SocialSignUpRequest":  {
+                                                                   "properties":  {
+                                                                                      "provider":  {
+                                                                                                       "type":  "string",
+                                                                                                       "title":  "Provider",
+                                                                                                       "description":  "google or apple"
+                                                                                                   },
+                                                                                      "token":  {
+                                                                                                    "type":  "string",
+                                                                                                    "title":  "Token",
+                                                                                                    "description":  "ID Token or Identity Token from the OAuth provider"
+                                                                                                },
+                                                                                      "name":  {
+                                                                                                   "anyOf":  [
+                                                                                                                 {
+                                                                                                                     "type":  "string"
+                                                                                                                 },
+                                                                                                                 {
+                                                                                                                     "type":  "null"
+                                                                                                                 }
+                                                                                                             ],
+                                                                                                   "title":  "Name",
+                                                                                                   "description":  "Optional user name if not included in the token (mostly Apple signups)"
+                                                                                               }
+                                                                                  },
+                                                                   "type":  "object",
+                                                                   "required":  [
+                                                                                    "provider",
+                                                                                    "token"
+                                                                                ],
+                                                                   "title":  "SocialSignUpRequest"
+                                                               },
+                                       "TokenRefreshRequest":  {
+                                                                   "properties":  {
+                                                                                      "refresh_token":  {
+                                                                                                            "type":  "string",
+                                                                                                            "title":  "Refresh Token"
+                                                                                                        }
+                                                                                  },
+                                                                   "type":  "object",
+                                                                   "required":  [
+                                                                                    "refresh_token"
+                                                                                ],
+                                                                   "title":  "TokenRefreshRequest"
+                                                               },
+                                       "UserDetailResponse":  {
+                                                                  "properties":  {
+                                                                                     "id":  {
+                                                                                                "type":  "integer",
+                                                                                                "title":  "Id"
+                                                                                            },
+                                                                                     "email":  {
+                                                                                                   "type":  "string",
+                                                                                                   "format":  "email",
+                                                                                                   "title":  "Email"
+                                                                                               },
+                                                                                     "name":  {
+                                                                                                  "anyOf":  [
+                                                                                                                {
+                                                                                                                    "type":  "string"
+                                                                                                                },
+                                                                                                                {
+                                                                                                                    "type":  "null"
+                                                                                                                }
+                                                                                                            ],
+                                                                                                  "title":  "Name"
+                                                                                              },
+                                                                                     "provider":  {
+                                                                                                      "type":  "string",
+                                                                                                      "title":  "Provider"
+                                                                                                  },
+                                                                                     "onboarding_completed":  {
+                                                                                                                  "type":  "boolean",
+                                                                                                                  "title":  "Onboarding Completed"
+                                                                                                              },
+                                                                                     "completed_at":  {
+                                                                                                          "anyOf":  [
+                                                                                                                        {
+                                                                                                                            "type":  "string",
+                                                                                                                            "format":  "date-time"
+                                                                                                                        },
+                                                                                                                        {
+                                                                                                                            "type":  "null"
+                                                                                                                        }
+                                                                                                                    ],
+                                                                                                          "title":  "Completed At"
+                                                                                                      },
+                                                                                     "profile":  {
+                                                                                                     "anyOf":  [
+                                                                                                                   {
+                                                                                                                       "$ref":  "#/components/schemas/ProfileSchema"
+                                                                                                                   },
+                                                                                                                   {
+                                                                                                                       "type":  "null"
+                                                                                                                   }
+                                                                                                               ]
+                                                                                                 },
+                                                                                     "goals":  {
+                                                                                                   "items":  {
+                                                                                                                 "type":  "string"
+                                                                                                             },
+                                                                                                   "type":  "array",
+                                                                                                   "title":  "Goals"
+                                                                                               },
+                                                                                     "permissions":  {
+                                                                                                         "anyOf":  [
+                                                                                                                       {
+                                                                                                                           "$ref":  "#/components/schemas/PermissionsSchema"
+                                                                                                                       },
+                                                                                                                       {
+                                                                                                                           "type":  "null"
+                                                                                                                       }
+                                                                                                                   ]
+                                                                                                     }
+                                                                                 },
+                                                                  "type":  "object",
+                                                                  "required":  [
+                                                                                   "id",
+                                                                                   "email",
+                                                                                   "provider",
+                                                                                   "onboarding_completed"
+                                                                               ],
+                                                                  "title":  "UserDetailResponse"
+                                                              },
+                                       "UserLogin":  {
+                                                         "properties":  {
+                                                                            "email":  {
+                                                                                          "type":  "string",
+                                                                                          "format":  "email",
+                                                                                          "title":  "Email"
+                                                                                      },
+                                                                            "password":  {
+                                                                                             "type":  "string",
+                                                                                             "title":  "Password"
+                                                                                         }
+                                                                        },
+                                                         "type":  "object",
+                                                         "required":  [
+                                                                          "email",
+                                                                          "password"
+                                                                      ],
+                                                         "title":  "UserLogin"
+                                                     },
+                                       "UserSignUp":  {
+                                                          "properties":  {
+                                                                             "email":  {
+                                                                                           "type":  "string",
+                                                                                           "format":  "email",
+                                                                                           "title":  "Email"
+                                                                                       },
+                                                                             "password":  {
+                                                                                              "type":  "string",
+                                                                                              "minLength":  6,
+                                                                                              "title":  "Password",
+                                                                                              "description":  "Password must be at least 6 characters"
+                                                                                          },
+                                                                             "name":  {
+                                                                                          "type":  "string",
+                                                                                          "title":  "Name",
+                                                                                          "description":  "User\u0027s Full Name"
+                                                                                      },
+                                                                             "provider":  {
+                                                                                              "anyOf":  [
+                                                                                                            {
+                                                                                                                "type":  "string"
+                                                                                                            },
+                                                                                                            {
+                                                                                                                "type":  "null"
+                                                                                                            }
+                                                                                                        ],
+                                                                                              "title":  "Provider",
+                                                                                              "description":  "Auth provider (defaults to email)",
+                                                                                              "default":  "email"
+                                                                                          }
+                                                                         },
+                                                          "type":  "object",
+                                                          "required":  [
+                                                                           "email",
+                                                                           "password",
+                                                                           "name"
+                                                                       ],
+                                                          "title":  "UserSignUp"
+                                                      },
+                                       "ValidationError":  {
+                                                               "properties":  {
+                                                                                  "loc":  {
+                                                                                              "items":  {
+                                                                                                            "anyOf":  [
+                                                                                                                          {
+                                                                                                                              "type":  "string"
+                                                                                                                          },
+                                                                                                                          {
+                                                                                                                              "type":  "integer"
+                                                                                                                          }
+                                                                                                                      ]
+                                                                                                        },
+                                                                                              "type":  "array",
+                                                                                              "title":  "Location"
+                                                                                          },
+                                                                                  "msg":  {
+                                                                                              "type":  "string",
+                                                                                              "title":  "Message"
+                                                                                          },
+                                                                                  "type":  {
+                                                                                               "type":  "string",
+                                                                                               "title":  "Error Type"
+                                                                                           },
+                                                                                  "input":  {
+                                                                                                "title":  "Input"
+                                                                                            },
+                                                                                  "ctx":  {
+                                                                                              "type":  "object",
+                                                                                              "title":  "Context"
+                                                                                          }
+                                                                              },
+                                                               "type":  "object",
+                                                               "required":  [
+                                                                                "loc",
+                                                                                "msg",
+                                                                                "type"
+                                                                            ],
+                                                               "title":  "ValidationError"
+                                                           }
+                                   }
+                   }
+}
