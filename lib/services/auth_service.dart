@@ -23,14 +23,16 @@ class AuthService {
   Future<User?> signInWithGoogle() async {
     try {
       // Trigger the Google Sign-in flow (v7.0.0+ uses authenticate())
-      final GoogleSignInAccount? googleUser = await GoogleSignIn.instance.authenticate();
+      final GoogleSignInAccount? googleUser = await GoogleSignIn.instance
+          .authenticate();
       if (googleUser == null) {
         // User cancelled the sign-in flow
         return null;
       }
 
       // Obtain auth details (tokens)
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
 
       // Create a credential for Firebase (v7.0.0+ only requires idToken)
       final AuthCredential credential = GoogleAuthProvider.credential(
@@ -38,7 +40,9 @@ class AuthService {
       );
 
       // Authenticate with Firebase
-      final UserCredential userCredential = await _auth.signInWithCredential(credential);
+      final UserCredential userCredential = await _auth.signInWithCredential(
+        credential,
+      );
       return userCredential.user;
     } catch (e) {
       print("Google Authentication error: $e");
@@ -69,7 +73,9 @@ class AuthService {
       );
 
       // Authenticate with Firebase
-      final UserCredential userCredential = await _auth.signInWithCredential(credential);
+      final UserCredential userCredential = await _auth.signInWithCredential(
+        credential,
+      );
       final User? user = userCredential.user;
 
       // Apple only returns name metadata on the first signup.
@@ -82,7 +88,8 @@ class AuthService {
             displayName = "$displayName ${appleIdCredential.familyName}";
           }
         }
-        if (displayName != null && (user.displayName == null || user.displayName!.isEmpty)) {
+        if (displayName != null &&
+            (user.displayName == null || user.displayName!.isEmpty)) {
           await user.updateDisplayName(displayName);
           await user.reload();
         }
@@ -129,10 +136,14 @@ class AuthService {
   }
 
   // Base API URL
-  static const String apiBaseUrl = 'http://192.168.1.101:8000';
+  static const String apiBaseUrl = 'http://192.168.1.107:8000';
 
   // Signup API
-  Future<Map<String, dynamic>> signUpWithEmail(String name, String email, String password) async {
+  Future<Map<String, dynamic>> signUpWithEmail(
+    String name,
+    String email,
+    String password,
+  ) async {
     try {
       final response = await http.post(
         Uri.parse('$apiBaseUrl/api/auth/signup'),
@@ -155,7 +166,7 @@ class AuthService {
         return data;
       } else {
         final errorMsg = _extractErrorMessage(data);
-        throw Exception(errorMsg);
+        throw AuthException(errorMsg);
       }
     } catch (e) {
       print("SignUp API error: $e");
@@ -164,15 +175,15 @@ class AuthService {
   }
 
   // Login API
-  Future<Map<String, dynamic>> loginWithEmail(String email, String password) async {
+  Future<Map<String, dynamic>> loginWithEmail(
+    String email,
+    String password,
+  ) async {
     try {
       final response = await http.post(
         Uri.parse('$apiBaseUrl/api/auth/login'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'password': password,
-        }),
+        body: jsonEncode({'email': email, 'password': password}),
       );
 
       final data = jsonDecode(response.body);
@@ -185,7 +196,7 @@ class AuthService {
         return data;
       } else {
         final errorMsg = _extractErrorMessage(data);
-        throw Exception(errorMsg);
+        throw AuthException(errorMsg);
       }
     } catch (e) {
       print("Login API error: $e");
@@ -198,15 +209,13 @@ class AuthService {
     try {
       final refreshToken = await getRefreshToken();
       if (refreshToken == null) {
-        throw Exception("No refresh token found");
+        throw AuthException("No refresh token found");
       }
 
       final response = await http.post(
         Uri.parse('$apiBaseUrl/api/auth/refresh'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'refresh_token': refreshToken,
-        }),
+        body: jsonEncode({'refresh_token': refreshToken}),
       );
 
       final data = jsonDecode(response.body);
@@ -220,11 +229,13 @@ class AuthService {
       } else {
         await _clearTokens();
         final errorMsg = _extractErrorMessage(data);
-        throw Exception(errorMsg);
+        throw AuthException(errorMsg);
       }
+    } on AuthException {
+      rethrow;
     } catch (e) {
-      print("Token Refresh API error: $e");
-      await _clearTokens();
+      print("Token Refresh API connection error: $e");
+      // Do NOT clear tokens on network/connection errors to preserve persistence
       rethrow;
     }
   }
@@ -235,9 +246,7 @@ class AuthService {
       final response = await http.post(
         Uri.parse('$apiBaseUrl/api/auth/forgot-password'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-        }),
+        body: jsonEncode({'email': email}),
       );
 
       final data = jsonDecode(response.body);
@@ -259,10 +268,7 @@ class AuthService {
       final response = await http.post(
         Uri.parse('$apiBaseUrl/api/auth/verify-otp'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'otp': otp,
-        }),
+        body: jsonEncode({'email': email, 'otp': otp}),
       );
 
       final data = jsonDecode(response.body);
@@ -308,7 +314,11 @@ class AuthService {
   }
 
   // Social Auth API backend linking
-  Future<Map<String, dynamic>> socialLoginBackend(String provider, String token, {String? name}) async {
+  Future<Map<String, dynamic>> socialLoginBackend(
+    String provider,
+    String token, {
+    String? name,
+  }) async {
     try {
       final response = await http.post(
         Uri.parse('$apiBaseUrl/api/auth/social-login'),
@@ -330,7 +340,7 @@ class AuthService {
         return data;
       } else {
         final errorMsg = _extractErrorMessage(data);
-        throw Exception(errorMsg);
+        throw AuthException(errorMsg);
       }
     } catch (e) {
       print("Social Login API error: $e");
@@ -399,9 +409,13 @@ class AuthService {
 
   /// Helper to generate a random cryptographically secure string (nonce)
   String _generateNonce([int length = 32]) {
-    const charset = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+    const charset =
+        '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
     final random = Random.secure();
-    return List.generate(length, (_) => charset[random.nextInt(charset.length)]).join();
+    return List.generate(
+      length,
+      (_) => charset[random.nextInt(charset.length)],
+    ).join();
   }
 
   /// Helper to hash a string using SHA-256
@@ -410,4 +424,12 @@ class AuthService {
     final digest = sha256.convert(bytes);
     return digest.toString();
   }
+}
+
+class AuthException implements Exception {
+  final String message;
+  AuthException(this.message);
+
+  @override
+  String toString() => message;
 }

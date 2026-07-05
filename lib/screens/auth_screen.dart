@@ -75,6 +75,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           final bool healthSyncEnabled = permissions['health_connect_connected'] ?? false;
           await prefs.setBool('health_sync_enabled', healthSyncEnabled);
 
+          if (backendUser['last_sync_date'] != null) {
+            await prefs.setString('last_sync_timestamp', backendUser['last_sync_date']);
+          }
+
           // Save onboarding completed in SharedPreferences
           await prefs.setString('onboarding_data', jsonEncode({
             'onboarding_completed': true,
@@ -163,6 +167,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           final permissions = backendUser['permissions'] ?? {};
           final bool healthSyncEnabled = permissions['health_connect_connected'] ?? false;
           await prefs.setBool('health_sync_enabled', healthSyncEnabled);
+
+          if (backendUser['last_sync_date'] != null) {
+            await prefs.setString('last_sync_timestamp', backendUser['last_sync_date']);
+          }
 
           // Save onboarding completed in SharedPreferences
           await prefs.setString('onboarding_data', jsonEncode({

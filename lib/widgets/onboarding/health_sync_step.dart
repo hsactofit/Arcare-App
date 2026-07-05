@@ -65,9 +65,10 @@ class _HealthSyncStepState extends State<HealthSyncStep> with SingleTickerProvid
                       delay: Duration.zero,
                       child: ScaleTransition(
                         scale: _scaleAnimation,
-                        child: const Text(
-                          "🔌",
-                          style: TextStyle(fontSize: 74),
+                        child: Image.asset(
+                          'assets/health_sync.png',
+                          width: 80,
+                          height: 80,
                         ),
                       ),
                     ),

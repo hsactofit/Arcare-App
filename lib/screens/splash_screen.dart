@@ -56,18 +56,36 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     try {
       final String? refreshToken = await AuthService.instance.getRefreshToken();
       if (refreshToken != null && refreshToken.isNotEmpty) {
-        // Attempt to validate/refresh token with backend
-        final response = await AuthService.instance.refreshSessionToken();
-        final user = response['user'];
-        if (user != null) {
-          isLoggedIn = true;
-          onboardingCompleted = user['onboarding_completed'] ?? false;
+        // If we have a local refresh token, we can consider the user logged in.
+        // If the network call below fails, we will retain this login state.
+        isLoggedIn = true;
+
+        final prefs = await SharedPreferences.getInstance();
+        onboardingCompleted = prefs.getBool('onboarding_completed') ?? false;
+
+        try {
+          // Attempt to validate/refresh token with backend
+          final response = await AuthService.instance.refreshSessionToken();
+          final user = response['user'];
+          if (user != null) {
+            onboardingCompleted = user['onboarding_completed'] ?? onboardingCompleted;
+            await prefs.setBool('onboarding_completed', onboardingCompleted);
+            if (user['last_sync_date'] != null) {
+              await prefs.setString('last_sync_timestamp', user['last_sync_date']);
+            }
+          }
+        } on AuthException catch (authError) {
+          print("Splash token verification failed: $authError");
+          // If the token is explicitly invalid, clear credentials and force login
+          isLoggedIn = false;
+          await AuthService.instance.signOut();
+        } catch (networkError) {
+          print("Splash token refresh network error (offline mode): $networkError");
+          // Retain isLoggedIn = true and use local onboardingCompleted state since it's just a network/server failure
         }
       }
     } catch (e) {
-      print("Splash token verification failed: $e");
-      // Clear credentials on token refresh validation failure
-      await AuthService.instance.signOut();
+      print("Splash initialization error: $e");
     }
 
     final elapsed = DateTime.now().difference(startTime);

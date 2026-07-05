@@ -148,6 +148,7 @@ class HealthService {
     HealthDataType.DISTANCE_DELTA,
     HealthDataType.ACTIVE_ENERGY_BURNED,
     HealthDataType.BASAL_ENERGY_BURNED,
+    HealthDataType.TOTAL_CALORIES_BURNED,
     HealthDataType.HEART_RATE,
     HealthDataType.RESTING_HEART_RATE,
     HealthDataType.SLEEP_ASLEEP,
@@ -189,6 +190,7 @@ class HealthService {
     HealthDataType.DISTANCE_DELTA,
     HealthDataType.ACTIVE_ENERGY_BURNED,
     HealthDataType.BASAL_ENERGY_BURNED,
+    HealthDataType.TOTAL_CALORIES_BURNED,
     HealthDataType.HEART_RATE,
     HealthDataType.RESTING_HEART_RATE,
     HealthDataType.SLEEP_ASLEEP,
@@ -415,19 +417,33 @@ class HealthService {
     List<MedicalRecord> medicalRecords = [];
 
     try {
-      List<HealthDataPoint> data = await _health.getHealthDataFromTypes(
-        startTime: startOfDay,
-        endTime: now,
-        types: readTypes,
-      );
+      final List<HealthDataPoint> data = [];
+      for (final type in readTypes) {
+        try {
+        final typeData = await _health.getHealthDataFromTypes(
+          startTime: startOfDay,
+          endTime: now,
+          types: [type],
+        );
+        data.addAll(typeData);
+      } catch (e) {
+        debugPrint("Error fetching health data type $type: $e");
+      }
+    }
 
-      List<HealthDataPoint> sleepData = await _health.getHealthDataFromTypes(
+    final List<HealthDataPoint> sleepData = [];
+    try {
+      final sleepTypeData = await _health.getHealthDataFromTypes(
         startTime: startOfSleep,
         endTime: now,
         types: [HealthDataType.SLEEP_ASLEEP],
       );
+      sleepData.addAll(sleepTypeData);
+    } catch (e) {
+      debugPrint("Error fetching sleep data: $e");
+    }
 
-      try {
+    try {
         int? stepCount = await _health.getTotalStepsInInterval(startOfDay, now);
         if (stepCount != null) {
           steps = stepCount.toDouble();
@@ -630,6 +646,312 @@ class HealthService {
       medicalRecordsConsented: _isMedicalConsented,
       medicalRecords: medicalRecords,
     );
+  }
+
+  /// Fetch health data for the last X days (maximum 7 days as requested).
+  Future<HealthData> fetchHealthDataForPeriod({int days = 7}) async {
+    await initialize();
+
+    final now = DateTime.now();
+    // Start from X days ago at 00:00:00
+    final startOfPeriod = DateTime(now.year, now.month, now.day).subtract(Duration(days: days - 1));
+    final startOfSleep = now.subtract(Duration(days: days));
+
+    double steps = 0.0;
+    double distance = 0.0;
+    double activeCalories = 0.0;
+    double basalCalories = 0.0;
+    int workouts = 0;
+    double exerciseMinutes = 0.0;
+    double heartRate = 0.0;
+    double restingHeartRate = 0.0;
+    double sleepDuration = 0.0;
+    double weight = 0.0;
+    double bmi = 0.0;
+    double? bodyFat;
+    double systolicBP = 0.0;
+    double diastolicBP = 0.0;
+    double bloodGlucose = 0.0;
+    double spo2 = 0.0;
+    double waterIntake = 0.0;
+    double mindfulnessMinutes = 0.0;
+    double carbs = 0.0;
+    double protein = 0.0;
+    double fat = 0.0;
+    double nutritionCalories = 0.0;
+    List<MedicalRecord> medicalRecords = [];
+
+    try {
+      List<HealthDataPoint> data = await _health.getHealthDataFromTypes(
+        startTime: startOfPeriod,
+        endTime: now,
+        types: readTypes,
+      );
+
+      List<HealthDataPoint> sleepData = await _health.getHealthDataFromTypes(
+        startTime: startOfSleep,
+        endTime: now,
+        types: [HealthDataType.SLEEP_ASLEEP],
+      );
+
+      try {
+        int? stepCount = await _health.getTotalStepsInInterval(startOfPeriod, now);
+        if (stepCount != null) {
+          steps = stepCount.toDouble();
+        }
+      } catch (e) {
+        debugPrint("Error getting aggregated steps: $e");
+      }
+
+      double heartRateSum = 0.0;
+      int heartRateCount = 0;
+
+      for (var point in data) {
+        final double? val = _extractDoubleValue(point);
+        if (val == null) continue;
+
+        switch (point.type) {
+          case HealthDataType.STEPS:
+            if (steps == 0.0) steps += val;
+            break;
+          case HealthDataType.DISTANCE_DELTA:
+            distance += val / 1000.0;
+            break;
+          case HealthDataType.ACTIVE_ENERGY_BURNED:
+            activeCalories += val;
+            break;
+          case HealthDataType.BASAL_ENERGY_BURNED:
+            basalCalories += val;
+            break;
+          case HealthDataType.HEART_RATE:
+            heartRateSum += val;
+            heartRateCount++;
+            break;
+          case HealthDataType.RESTING_HEART_RATE:
+            restingHeartRate = val;
+            break;
+          case HealthDataType.WEIGHT:
+            weight = val;
+            break;
+          case HealthDataType.BODY_MASS_INDEX:
+            bmi = val;
+            break;
+          case HealthDataType.BODY_FAT_PERCENTAGE:
+            bodyFat = val <= 1.0 ? val * 100.0 : val;
+            break;
+          case HealthDataType.BLOOD_PRESSURE_SYSTOLIC:
+            systolicBP = val;
+            break;
+          case HealthDataType.BLOOD_PRESSURE_DIASTOLIC:
+            diastolicBP = val;
+            break;
+          case HealthDataType.BLOOD_GLUCOSE:
+            bloodGlucose = val;
+            break;
+          case HealthDataType.BLOOD_OXYGEN:
+            spo2 = val <= 1.0 ? val * 100.0 : val;
+            break;
+          case HealthDataType.WATER:
+            waterIntake += val < 10.0 ? val * 1000.0 : val;
+            break;
+          case HealthDataType.MINDFULNESS:
+            mindfulnessMinutes += point.dateTo.difference(point.dateFrom).inMinutes.toDouble();
+            break;
+          case HealthDataType.WORKOUT:
+            workouts++;
+            exerciseMinutes += point.dateTo.difference(point.dateFrom).inMinutes.toDouble();
+            break;
+          case HealthDataType.NUTRITION:
+            if (point.value is NutritionHealthValue) {
+              final nutVal = point.value as NutritionHealthValue;
+              carbs += nutVal.carbs ?? 0;
+              protein += nutVal.protein ?? 0;
+              fat += nutVal.fat ?? 0;
+              nutritionCalories += nutVal.calories ?? 0;
+            }
+            break;
+          default:
+            break;
+        }
+      }
+
+      if (heartRateCount > 0) {
+        heartRate = heartRateSum / heartRateCount;
+      }
+
+      double sleepMins = 0;
+      for (var point in sleepData) {
+        if (point.type == HealthDataType.SLEEP_ASLEEP) {
+          sleepMins += point.dateTo.difference(point.dateFrom).inMinutes.toDouble();
+        }
+      }
+      sleepDuration = sleepMins / 60.0;
+
+      if (bmi == 0.0 && weight > 0.0) {
+        bmi = weight / (1.75 * 1.75);
+      }
+    } catch (e) {
+      debugPrint("Error fetching health data for period: $e");
+    }
+
+    return HealthData(
+      steps: steps.roundToDouble(),
+      distance: double.parse(distance.toStringAsFixed(2)),
+      activeCalories: activeCalories.roundToDouble(),
+      basalCalories: basalCalories.roundToDouble(),
+      workouts: workouts,
+      exerciseMinutes: exerciseMinutes,
+      heartRate: heartRate,
+      restingHeartRate: restingHeartRate,
+      sleepDuration: double.parse(sleepDuration.toStringAsFixed(1)),
+      weight: double.parse(weight.toStringAsFixed(1)),
+      bmi: double.parse(bmi.toStringAsFixed(1)),
+      bodyFat: bodyFat != null ? double.parse(bodyFat.toStringAsFixed(1)) : null,
+      systolicBP: systolicBP,
+      diastolicBP: diastolicBP,
+      bloodGlucose: bloodGlucose,
+      spo2: spo2,
+      waterIntake: waterIntake.roundToDouble(),
+      mindfulnessMinutes: mindfulnessMinutes,
+      carbs: carbs.roundToDouble(),
+      protein: protein.roundToDouble(),
+      fat: fat.roundToDouble(),
+      nutritionCalories: nutritionCalories.roundToDouble(),
+      medicalRecordsConsented: _isMedicalConsented,
+      medicalRecords: medicalRecords,
+    );
+  }
+
+  /// Fetch daily health data records for the last X days.
+  Future<List<Map<String, dynamic>>> fetchDailyHealthDataForPeriod({int days = 7}) async {
+    await initialize();
+
+    final now = DateTime.now();
+    final List<Map<String, dynamic>> dailyRecords = [];
+
+    for (int i = 0; i < days; i++) {
+      final targetDate = DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
+      final startTime = targetDate;
+      final endTime = i == 0 ? now : DateTime(targetDate.year, targetDate.month, targetDate.day, 23, 59, 59);
+      final dateString = "${targetDate.year}-${targetDate.month.toString().padLeft(2, '0')}-${targetDate.day.toString().padLeft(2, '0')}";
+
+      double steps = 0.0;
+      double activeCalories = 0.0;
+      double basalCalories = 0.0;
+      int workouts = 0;
+      double heartRate = 0.0;
+      double sleepDuration = 0.0;
+      double waterIntake = 0.0;
+
+      try {
+        final List<HealthDataPoint> data = [];
+        final typesToFetch = [
+          HealthDataType.STEPS,
+          HealthDataType.ACTIVE_ENERGY_BURNED,
+          HealthDataType.BASAL_ENERGY_BURNED,
+          HealthDataType.HEART_RATE,
+          HealthDataType.WATER,
+          HealthDataType.WORKOUT,
+        ];
+
+      for (final type in typesToFetch) {
+        try {
+          final typeData = await _health.getHealthDataFromTypes(
+            startTime: startTime,
+            endTime: endTime,
+            types: [type],
+          );
+          data.addAll(typeData);
+        } catch (e) {
+          debugPrint("Error fetching daily health data type $type: $e");
+        }
+      }
+
+      final List<HealthDataPoint> sleepData = [];
+      try {
+        final sleepTypeData = await _health.getHealthDataFromTypes(
+          startTime: startTime.subtract(const Duration(hours: 12)),
+          endTime: endTime,
+          types: [HealthDataType.SLEEP_ASLEEP],
+        );
+        sleepData.addAll(sleepTypeData);
+      } catch (e) {
+        debugPrint("Error fetching daily sleep data: $e");
+      }
+
+        try {
+          int? stepCount = await _health.getTotalStepsInInterval(startTime, endTime);
+          if (stepCount != null) {
+            steps = stepCount.toDouble();
+          }
+        } catch (e) {
+          debugPrint("Error getting steps for $dateString: $e");
+        }
+
+        double heartRateSum = 0.0;
+        int heartRateCount = 0;
+
+        for (var point in data) {
+          final double? val = _extractDoubleValue(point);
+          if (val == null) continue;
+
+          switch (point.type) {
+            case HealthDataType.STEPS:
+              if (steps == 0.0) steps += val;
+              break;
+            case HealthDataType.ACTIVE_ENERGY_BURNED:
+              activeCalories += val;
+              break;
+            case HealthDataType.BASAL_ENERGY_BURNED:
+              basalCalories += val;
+              break;
+            case HealthDataType.HEART_RATE:
+              heartRateSum += val;
+              heartRateCount++;
+              break;
+            case HealthDataType.WATER:
+              waterIntake += val < 10.0 ? val * 1000.0 : val;
+              break;
+            case HealthDataType.WORKOUT:
+              workouts++;
+              break;
+            default:
+              break;
+          }
+        }
+
+        if (heartRateCount > 0) {
+          heartRate = heartRateSum / heartRateCount;
+        }
+
+        double sleepMins = 0;
+        for (var point in sleepData) {
+          if (point.type == HealthDataType.SLEEP_ASLEEP) {
+            if (point.dateTo.year == targetDate.year &&
+                point.dateTo.month == targetDate.month &&
+                point.dateTo.day == targetDate.day) {
+              sleepMins += point.dateTo.difference(point.dateFrom).inMinutes.toDouble();
+            }
+          }
+        }
+        sleepDuration = sleepMins / 60.0;
+
+      } catch (e) {
+        debugPrint("Error fetching health data for $dateString: $e");
+      }
+
+      dailyRecords.add({
+        'date': dateString,
+        'steps': steps.round(),
+        'calories': (activeCalories + basalCalories).round(),
+        'sleep_duration_hours': double.parse(sleepDuration.toStringAsFixed(1)),
+        'water_intake_ml': waterIntake.round(),
+        'workouts_count': workouts,
+        'heart_rate_bpm': heartRate.round(),
+      });
+    }
+
+    return dailyRecords;
   }
 
   double? _extractDoubleValue(HealthDataPoint point) {

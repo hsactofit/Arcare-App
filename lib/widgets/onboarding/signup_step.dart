@@ -29,6 +29,50 @@ class _SignupStepState extends State<SignupStep> {
   bool _isLogin = false;
   bool _obscurePassword = true;
   bool _agreedToTerms = false;
+  final FocusNode _passwordFocusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.passwordController.addListener(_onPasswordChanged);
+    _passwordFocusNode.addListener(_onFocusChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.passwordController.removeListener(_onPasswordChanged);
+    _passwordFocusNode.removeListener(_onFocusChanged);
+    _passwordFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _onFocusChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _onPasswordChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  bool get _hasMinLength => widget.passwordController.text.length >= 8;
+  bool get _hasUppercase => widget.passwordController.text.contains(RegExp(r'[A-Z]'));
+  bool get _hasLowercase => widget.passwordController.text.contains(RegExp(r'[a-z]'));
+  bool get _hasNumber => widget.passwordController.text.contains(RegExp(r'[0-9]'));
+  bool get _hasSpecialChar => widget.passwordController.text.contains(RegExp(r'[!@#\$%^&*(),.?":{}|<>]'));
+
+  int get _strengthScore {
+    int score = 0;
+    if (_hasMinLength) score++;
+    if (_hasUppercase) score++;
+    if (_hasLowercase) score++;
+    if (_hasNumber) score++;
+    if (_hasSpecialChar) score++;
+    return score;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -251,6 +295,7 @@ class _SignupStepState extends State<SignupStep> {
                           const SizedBox(height: 6),
                           TextFormField(
                             controller: widget.passwordController,
+                            focusNode: _passwordFocusNode,
                             obscureText: _obscurePassword,
                             style: TextStyle(
                               color: isDark ? Colors.white : Colors.black87,
@@ -275,10 +320,34 @@ class _SignupStepState extends State<SignupStep> {
                                 },
                               ),
                             ),
-                            validator: (v) => (v == null || v.length < 6)
-                                ? "Password must be at least 6 characters"
-                                : null,
+                            validator: (v) {
+                              if (_isLogin) {
+                                return (v == null || v.isEmpty)
+                                    ? "Please enter your password"
+                                    : null;
+                              }
+                              if (v == null || v.isEmpty) {
+                                    return "Please enter a password";
+                              }
+                              if (v.length < 8) {
+                                    return "Password must be at least 8 characters";
+                              }
+                              if (!v.contains(RegExp(r'[A-Z]'))) {
+                                    return "Must contain at least one uppercase letter";
+                              }
+                              if (!v.contains(RegExp(r'[a-z]'))) {
+                                    return "Must contain at least one lowercase letter";
+                              }
+                              if (!v.contains(RegExp(r'[0-9]'))) {
+                                    return "Must contain at least one number";
+                              }
+                              if (!v.contains(RegExp(r'[!@#\$%^&*(),.?":{}|<>]'))) {
+                                    return "Must contain at least one special character";
+                              }
+                              return null;
+                            },
                           ),
+                          _buildPasswordIndicator(isDark),
                         ],
                       ),
                     ),
@@ -1006,6 +1075,203 @@ class _SignupStepState extends State<SignupStep> {
         borderRadius: BorderRadius.circular(14),
         borderSide: const BorderSide(color: Colors.redAccent, width: 2.0),
       ),
+    );
+  }
+
+  Widget _buildPasswordIndicator(bool isDark) {
+    final isFocused = _passwordFocusNode.hasFocus;
+    
+    if (widget.passwordController.text.isEmpty && !isFocused) {
+      return const SizedBox.shrink();
+    }
+
+    final score = _strengthScore;
+    Color strengthColor;
+    String strengthText;
+
+    if (score <= 2) {
+      strengthColor = Colors.redAccent;
+      strengthText = "Weak Security";
+    } else if (score <= 4) {
+      strengthColor = Colors.amber;
+      strengthText = "Medium Strength";
+    } else {
+      strengthColor = Colors.greenAccent;
+      strengthText = "Strong Password";
+    }
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      child: Container(
+        margin: const EdgeInsets.only(top: 14),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isDark 
+              ? Colors.white.withOpacity(0.02) 
+              : Colors.black.withOpacity(0.015),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06),
+            width: 1.0,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Row with rating & status
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      score == 5 ? Icons.verified_user : Icons.gpp_maybe_outlined,
+                      size: 15,
+                      color: strengthColor,
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      "PASSWORD ADVISOR",
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.grey,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ],
+                ),
+                AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 300),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: strengthColor,
+                  ),
+                  child: Text(strengthText),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Segmented Progress Bar (5 bars)
+            Row(
+              children: List.generate(5, (index) {
+                final isLit = index < score;
+                return Expanded(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    margin: EdgeInsets.only(
+                      left: index == 0 ? 0 : 4,
+                      right: index == 4 ? 0 : 4,
+                    ),
+                    height: 5,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      color: isLit
+                          ? strengthColor
+                          : (isDark ? Colors.white10 : Colors.black12),
+                      boxShadow: isLit
+                          ? [
+                              BoxShadow(
+                                color: strengthColor.withOpacity(0.4),
+                                blurRadius: 6,
+                                spreadRadius: 1,
+                              ),
+                            ]
+                          : [],
+                    ),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 16),
+            // Grid of requirements (2 columns for clean layout)
+            Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildRequirementRow("8+ Characters", _hasMinLength, Icons.straighten, isDark),
+                    ),
+                    Expanded(
+                      child: _buildRequirementRow("Uppercase Letter", _hasUppercase, Icons.title, isDark),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildRequirementRow("Lowercase Letter", _hasLowercase, Icons.text_fields, isDark),
+                    ),
+                    Expanded(
+                      child: _buildRequirementRow("Numeric Digit", _hasNumber, Icons.numbers, isDark),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildRequirementRow("Special Symbol", _hasSpecialChar, Icons.alternate_email, isDark),
+                    ),
+                    const Expanded(child: SizedBox.shrink()),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRequirementRow(String label, bool isMet, IconData icon, bool isDark) {
+    final activeColor = isMet 
+        ? Colors.greenAccent 
+        : (isDark ? Colors.white30 : Colors.black38);
+    final textStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: isMet ? FontWeight.bold : FontWeight.w500,
+      color: isMet 
+          ? (isDark ? Colors.white : Colors.black87) 
+          : (isDark ? Colors.white30 : Colors.black38),
+    );
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          padding: const EdgeInsets.all(5),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isMet 
+                ? Colors.greenAccent.withOpacity(isDark ? 0.15 : 0.2) 
+                : Colors.transparent,
+            border: Border.all(
+              color: isMet 
+                  ? Colors.greenAccent.withOpacity(0.5) 
+                  : (isDark ? Colors.white10 : Colors.black12),
+              width: 1.0,
+            ),
+          ),
+          child: Icon(
+            icon,
+            size: 13,
+            color: activeColor,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 300),
+            style: textStyle,
+            child: Text(label),
+          ),
+        ),
+      ],
     );
   }
 }

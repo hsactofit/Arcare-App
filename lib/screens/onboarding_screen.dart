@@ -149,6 +149,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
 
   // Syncing simulation and saving JSON payload
   Future<void> _startSyncAndFinish() async {
+    _nextPage();
     setState(() {
       _isSyncing = true;
       _syncProgress = 0.0;

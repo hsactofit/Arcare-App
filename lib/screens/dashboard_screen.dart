@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:health/health.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/health_service.dart';
@@ -12,6 +14,7 @@ import 'package:http/http.dart' as http;
 import '../services/auth_service.dart';
 import 'main_shell.dart';
 import 'onboarding_screen.dart';
+import 'water_logging_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -27,13 +30,14 @@ class DashboardScreenState extends State<DashboardScreen>
   bool _isSyncing = false;
   HealthData _healthData = HealthData();
   DateTime? _lastSynced;
+  String _userName = "User";
 
   // Custom goals
-  final double _stepGoal = 10000.0;
-  final double _waterGoal = 2500.0;
-  final double _calorieGoal = 600.0;
-  final double _exerciseGoal = 60.0;
-  final double _sleepGoal = 8.0;
+  double _stepGoal = 10000.0;
+  double _waterGoal = 2500.0;
+  double _calorieGoal = 600.0;
+  double _exerciseGoal = 60.0;
+  double _sleepGoal = 8.0;
 
   // Onboarding & Setup States
   bool _healthSetupCompleted = false;
@@ -44,6 +48,10 @@ class DashboardScreenState extends State<DashboardScreen>
   int? _serverWellnessScore;
   String? _serverDailySummary;
   List<String> _serverRecommendations = [];
+  int? _activeSubscore;
+  int? _sleepSubscore;
+  int? _nutritionSubscore;
+  int? _mindfulnessSubscore;
 
   @override
   void initState() {
@@ -58,6 +66,14 @@ class DashboardScreenState extends State<DashboardScreen>
       _healthSetupCompleted = prefs.getBool('healthSetupCompleted') ?? false;
       _healthConnectRequested =
           prefs.getBool('healthConnectRequested') ?? false;
+      _userName = prefs.getString('user_name') ?? "User";
+
+      // Load custom goals configuration
+      _stepGoal = prefs.getDouble('goal_steps') ?? 10000.0;
+      _waterGoal = prefs.getDouble('goal_water') ?? 2500.0;
+      _calorieGoal = prefs.getDouble('goal_calories') ?? 600.0;
+      _exerciseGoal = prefs.getDouble('goal_exercise') ?? 60.0;
+      _sleepGoal = prefs.getDouble('goal_sleep') ?? 8.0;
     });
   }
 
@@ -132,6 +148,7 @@ class DashboardScreenState extends State<DashboardScreen>
             onPressed: () {
               final val = double.tryParse(controller.text) ?? 0.0;
               if (val > 0) {
+                final messenger = ScaffoldMessenger.of(context);
                 setState(() {
                   if (metric == "Water") {
                     _healthData = _healthData.copyWith(
@@ -146,12 +163,12 @@ class DashboardScreenState extends State<DashboardScreen>
                     );
                   } else if (metric == "Steps") {
                     _healthData = _healthData.copyWith(
-                      steps: _healthData.steps + val.round(),
+                      steps: _healthData.steps + val,
                     );
                   }
                 });
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger.showSnackBar(
                   SnackBar(content: Text("$metric logged successfully!")),
                 );
               }
@@ -171,6 +188,8 @@ class DashboardScreenState extends State<DashboardScreen>
       setState(() => _sdkStatus = status);
     }
 
+    await _loadSetupState();
+
     final prefs = await SharedPreferences.getInstance();
     final bool healthSyncEnabled =
         prefs.getBool('health_sync_enabled') ?? false;
@@ -179,7 +198,10 @@ class DashboardScreenState extends State<DashboardScreen>
       final hasPerms = await HealthService.instance.checkPermissions();
       setState(() => _isConnected = hasPerms);
       if (hasPerms) {
-        await _fetchRealData();
+        await _fetchRealData(forceSync: false);
+      } else {
+        // Automatically request permissions if enabled but missing
+        await _connectHealthServices(showSnackbarOnFailure: false);
       }
     } else {
       setState(() => _isConnected = false);
@@ -188,7 +210,9 @@ class DashboardScreenState extends State<DashboardScreen>
     setState(() => _isSyncing = false);
   }
 
-  Future<void> _connectHealthServices() async {
+  Future<void> _connectHealthServices({
+    bool showSnackbarOnFailure = true,
+  }) async {
     if (Platform.isAndroid &&
         _sdkStatus != HealthConnectSdkStatus.sdkAvailable) {
       _showDownloadRationaleDialog();
@@ -203,7 +227,7 @@ class DashboardScreenState extends State<DashboardScreen>
     if (success) {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('health_sync_enabled', true);
-      await _fetchRealData();
+      await _fetchRealData(forceSync: true);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -212,55 +236,117 @@ class DashboardScreenState extends State<DashboardScreen>
         ),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            "Failed to grant health permissions. Please enable them to sync data.",
+      if (showSnackbarOnFailure) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Failed to grant health permissions. Please enable them to sync data.",
+            ),
+            backgroundColor: Colors.orange,
           ),
-          backgroundColor: Colors.orange,
-        ),
-      );
+        );
+      }
     }
     setState(() => _isSyncing = false);
   }
 
-  Future<void> _fetchRealData() async {
+  Future<void> _fetchRealData({bool forceSync = false}) async {
+    // 1. Always load the active local Health Connect data to update the UI cards
     final data = await HealthService.instance.fetchHealthData();
     setState(() {
       _healthData = data;
-      _lastSynced = DateTime.now();
     });
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jsonStr = prefs.getString('onboarding_data');
-      if (jsonStr != null) {
-        final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
-        final email = onboarding['auth']?['email'];
-        if (email != null) {
-          await _syncAndRefreshDashboard(email, data);
+
+      // 2. Populate states from the local cache immediately for an instant load
+      setState(() {
+        _serverWellnessScore = prefs.getInt('cached_wellness_score');
+        _serverDailySummary = prefs.getString('cached_daily_summary');
+        _activeSubscore = prefs.getInt('cached_active_subscore');
+        _sleepSubscore = prefs.getInt('cached_sleep_subscore');
+        _nutritionSubscore = prefs.getInt('cached_nutrition_subscore');
+        _mindfulnessSubscore = prefs.getInt('cached_mindfulness_subscore');
+        final cachedRecs = prefs.getStringList('cached_recommendations');
+        if (cachedRecs != null) {
+          _serverRecommendations = cachedRecs;
         }
+        final lastSyncedStr = prefs.getString('last_sync_timestamp');
+        if (lastSyncedStr != null) {
+          _lastSynced = DateTime.tryParse(lastSyncedStr);
+        }
+        final localName = prefs.getString('user_name');
+        if (localName != null && localName.isNotEmpty) {
+          _userName = localName;
+        } else {
+          final jsonStr = prefs.getString('onboarding_data');
+          if (jsonStr != null) {
+            final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
+            final name = onboarding['auth']?['name'];
+            if (name != null && name.isNotEmpty) {
+              _userName = name;
+            }
+          }
+        }
+      });
+
+      // 3. Determine if we should perform a backend synchronization
+      bool shouldSync = forceSync;
+      if (!shouldSync) {
+        if (_lastSynced == null) {
+          shouldSync = true;
+        } else {
+          final elapsed = DateTime.now().difference(_lastSynced!);
+          if (elapsed.inHours >= 2) {
+            shouldSync = true;
+          }
+        }
+      }
+
+      if (shouldSync) {
+        final jsonStr = prefs.getString('onboarding_data');
+        if (jsonStr != null) {
+          final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
+          final email = onboarding['auth']?['email'];
+          if (email != null) {
+            // Fetch daily health data for the last 7 days to sync to backend day-wise
+            final syncData = await HealthService.instance
+                .fetchDailyHealthDataForPeriod(days: 7);
+            await _syncAndRefreshDashboard(email, syncData);
+          }
+        }
+      } else {
+        debugPrint(
+          "Auto-sync skipped: last sync was less than 2 hours ago (${_lastSynced != null ? DateTime.now().difference(_lastSynced!).inMinutes : 0} mins ago).",
+        );
       }
     } catch (e) {
       debugPrint("Error in _fetchRealData combined flow: $e");
     }
   }
 
-  Future<void> _syncAndRefreshDashboard(String email, HealthData data) async {
+  Future<void> _syncAndRefreshDashboard(
+    String email,
+    List<Map<String, dynamic>> dailyRecords,
+  ) async {
     try {
       final token = await AuthService.instance.getAccessToken();
+      final prefs = await SharedPreferences.getInstance();
 
-      // 1. Sync Health Data (POST)
+      // Combined Endpoint: Sync Health and retrieve complete dashboard metrics
       final syncUrl =
-          '${AuthService.apiBaseUrl}/api/health/sync/${Uri.encodeComponent(email)}';
-      final syncPayload = {
-        'steps': data.steps.round(),
-        'calories': (data.activeCalories + data.basalCalories).round(),
-        'sleep_duration_hours': data.sleepDuration,
-        'water_intake_ml': data.waterIntake.round(),
-        'workouts_count': data.workouts,
-        'heart_rate_bpm': data.heartRate.round(),
-      };
+          '${AuthService.apiBaseUrl}/api/dashboard/sync/${Uri.encodeComponent(email)}';
+      final syncPayload = dailyRecords;
+
+      // Debug log the full JSON payload
+      debugPrint(
+        "================ MERGED HOME SYNC JSON PAYLOAD (LAST 7 DAYS DAILY) ================",
+      );
+      debugPrint(const JsonEncoder.withIndent('  ').convert(syncPayload));
+      debugPrint(
+        "===================================================================================",
+      );
 
       final response = await http.post(
         Uri.parse(syncUrl),
@@ -272,41 +358,213 @@ class DashboardScreenState extends State<DashboardScreen>
       );
 
       if (response.statusCode == 200) {
-        debugPrint("Successfully synced health telemetry to server.");
-      } else {
-        debugPrint(
-          "Failed to sync health telemetry: ${response.statusCode} - ${response.body}",
+        final resData = jsonDecode(response.body);
+        final int score = resData['wellness_score'] ?? 75;
+        final String summary = resData['daily_summary'] ?? "";
+        final List<String> recs = List<String>.from(
+          resData['recommendations'] ?? [],
         );
-      }
+        final String buddyMsg =
+            resData['ai_buddy_message'] ?? "Hi! I am your AI Buddy.";
+        final int activeSub = resData['active_subscore'] ?? 0;
+        final int sleepSub = resData['sleep_subscore'] ?? 0;
+        final int nutriSub = resData['nutrition_subscore'] ?? 0;
+        final int mindSub = resData['mindfulness_subscore'] ?? 0;
 
-      // 2. Fetch Dashboard Metrics (GET)
-      final url =
-          '${AuthService.apiBaseUrl}/api/dashboard/${Uri.encodeComponent(email)}';
-      final responseDash = await http.get(
-        Uri.parse(url),
-        headers: {if (token != null) 'Authorization': 'Bearer $token'},
-      );
-
-      if (responseDash.statusCode == 200) {
-        final dashData = jsonDecode(responseDash.body);
         setState(() {
-          _serverWellnessScore = dashData['wellness_score'];
-          _serverDailySummary = dashData['daily_summary'];
-          if (dashData['recommendations'] != null) {
-            _serverRecommendations = List<String>.from(
-              dashData['recommendations'],
-            );
-          }
+          _serverWellnessScore = score;
+          _serverDailySummary = summary;
+          _serverRecommendations = recs;
+          _activeSubscore = activeSub;
+          _sleepSubscore = sleepSub;
+          _nutritionSubscore = nutriSub;
+          _mindfulnessSubscore = mindSub;
+          _lastSynced = DateTime.now();
         });
-        debugPrint("Successfully fetched dashboard data from server.");
+
+        // Save to SharedPreferences cache
+        await prefs.setInt('cached_wellness_score', score);
+        await prefs.setInt('cached_active_subscore', activeSub);
+        await prefs.setInt('cached_sleep_subscore', sleepSub);
+        await prefs.setInt('cached_nutrition_subscore', nutriSub);
+        await prefs.setInt('cached_mindfulness_subscore', mindSub);
+        await prefs.setString('cached_daily_summary', summary);
+        await prefs.setStringList('cached_recommendations', recs);
+        await prefs.setString('cached_ai_buddy_message', buddyMsg);
+        await prefs.setString(
+          'last_sync_timestamp',
+          _lastSynced!.toIso8601String(),
+        );
+
+        debugPrint(
+          "Successfully executed merged sync and updated local dashboard cache.",
+        );
       } else {
         debugPrint(
-          "Failed to fetch dashboard data: ${responseDash.statusCode} - ${responseDash.body}",
+          "Failed to execute merged sync: ${response.statusCode} - ${response.body}",
         );
       }
     } catch (e) {
-      debugPrint("Error in _syncAndRefreshDashboard: $e");
+      debugPrint("Error in _syncAndRefreshDashboard combined flow: $e");
     }
+  }
+
+  Future<void> _showHealthSyncDataDialog() async {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        final theme = Theme.of(context);
+        final isDark = theme.brightness == Brightness.dark;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return FutureBuilder<List<Map<String, dynamic>>>(
+              future: HealthService.instance.fetchDailyHealthDataForPeriod(
+                days: 7,
+              ),
+              builder: (context, snapshot) {
+                Widget content;
+                List<Map<String, dynamic>> payload = [];
+
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  content = const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(32.0),
+                      child: CircularProgressIndicator(
+                        color: Colors.tealAccent,
+                      ),
+                    ),
+                  );
+                } else if (snapshot.hasError) {
+                  content = Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Text(
+                        "Error loading data: ${snapshot.error}",
+                        style: const TextStyle(color: Colors.redAccent),
+                      ),
+                    ),
+                  );
+                } else {
+                  payload = snapshot.data!;
+                  final prettyJson = const JsonEncoder.withIndent(
+                    '  ',
+                  ).convert(payload);
+
+                  content = Container(
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.black26
+                          : Colors.black.withOpacity(0.03),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isDark ? Colors.white10 : Colors.black12,
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: SelectableText(
+                        prettyJson,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  );
+                }
+
+                return AlertDialog(
+                  backgroundColor: isDark
+                      ? const Color(0xFF1E1E26)
+                      : Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  title: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(
+                            Icons.bug_report_outlined,
+                            color: Colors.tealAccent,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            "Health Sync Debugger",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 20),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  content: SizedBox(
+                    width: MediaQuery.of(context).size.width * 0.85,
+                    height: 380,
+                    child: content,
+                  ),
+                  actions: [
+                    if (snapshot.connectionState == ConnectionState.done &&
+                        !snapshot.hasError)
+                      TextButton.icon(
+                        icon: const Icon(
+                          Icons.copy_outlined,
+                          size: 16,
+                          color: Colors.tealAccent,
+                        ),
+                        label: const Text(
+                          "Copy JSON",
+                          style: TextStyle(color: Colors.tealAccent),
+                        ),
+                        onPressed: () {
+                          Clipboard.setData(
+                            ClipboardData(
+                              text: const JsonEncoder.withIndent(
+                                '  ',
+                              ).convert(payload),
+                            ),
+                          );
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                "JSON payload copied to clipboard!",
+                              ),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                      ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text(
+                        "Close",
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _showOnboardingDataDialog() async {
@@ -617,7 +875,7 @@ class DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _syncData() async {
     setState(() => _isSyncing = true);
-    await _fetchRealData();
+    await _fetchRealData(forceSync: true);
     if (!mounted) return;
     setState(() => _isSyncing = false);
 
@@ -659,96 +917,138 @@ class DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildHeader(ThemeData theme, bool isDark) {
+    final now = DateTime.now();
+    final daysOfWeek = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
+    final months = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    final dayName = daysOfWeek[now.weekday % 7];
+    final monthName = months[now.month - 1];
+    final dateHeaderString = "$dayName • $monthName ${now.day}";
+
     return SliverToBoxAdapter(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Profile Picture
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.blueAccent.withOpacity(0.4),
-                      width: 1.5,
-                    ),
-                    image: const DecorationImage(
-                      image: NetworkImage(
-                        "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=256&auto=format&fit=crop",
-                      ),
-                      fit: BoxFit.cover,
-                    ),
+                Text(
+                  dateHeaderString,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white60 : Colors.black54,
+                    letterSpacing: 0.5,
                   ),
                 ),
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Hello, Champion! ✨",
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.5,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                    Text(
-                      _lastSynced != null
-                          ? "Last synced: ${_formatLastSynced(_lastSynced!)}"
-                          : "Ready to sync your wellness?",
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isDark ? Colors.grey[400] : Colors.grey[600],
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 2),
+                Text(
+                  "Hey, $_userName 👋",
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.6,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
                 ),
               ],
             ),
             Row(
               children: [
-                // Debug Onboarding Inspector
-                IconButton(
-                  icon: const Icon(
-                    Icons.data_object_outlined,
-                    color: Colors.blueAccent,
-                  ),
-                  tooltip: "View Onboarding Data",
-                  onPressed: _showOnboardingDataDialog,
-                ),
-                const SizedBox(width: 4),
-                // Notification Icon
-                Stack(
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        Icons.notifications_outlined,
-                        color: isDark ? Colors.white70 : Colors.black87,
+                // Notification Bell (Circular)
+                GestureDetector(
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("No new notifications")),
+                    );
+                  },
+                  child: Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.white.withOpacity(0.06)
+                          : Colors.white,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isDark
+                            ? Colors.white10
+                            : Colors.black.withOpacity(0.08),
+                        width: 1.2,
                       ),
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("No new notifications")),
-                        );
-                      },
                     ),
-                    Positioned(
-                      right: 8,
-                      top: 8,
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: Colors.redAccent,
-                          shape: BoxShape.circle,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Icon(
+                          Icons.notifications_outlined,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                          size: 20,
                         ),
+                        Positioned(
+                          right: 10,
+                          top: 10,
+                          child: Container(
+                            width: 6,
+                            height: 6,
+                            decoration: const BoxDecoration(
+                              color: Colors.redAccent,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Profile Avatar Initial Button (Circular)
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withOpacity(0.06)
+                        : Colors.white,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white10
+                          : Colors.black.withOpacity(0.08),
+                      width: 1.2,
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      "P",
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: isDark ? Colors.white : Colors.black87,
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ],
             ),
@@ -772,7 +1072,7 @@ class DashboardScreenState extends State<DashboardScreen>
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            const Text("🔌", style: TextStyle(fontSize: 28)),
+            Image.asset('assets/health_sync.png', width: 32, height: 32),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -889,7 +1189,7 @@ class DashboardScreenState extends State<DashboardScreen>
 
     return Column(
       children: [
-        // 1. Dashboard Banner
+        // 2. Dashboard Banner (Info Section) - MOVED TO BOTTOM
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: GlassCard(
@@ -924,7 +1224,7 @@ class DashboardScreenState extends State<DashboardScreen>
                 ),
                 const SizedBox(height: 16),
 
-                // 2. Setup Progress
+                // Setup Progress
                 const Text(
                   "Setup Progress",
                   style: TextStyle(
@@ -942,7 +1242,7 @@ class DashboardScreenState extends State<DashboardScreen>
 
                 const SizedBox(height: 16),
 
-                // 3. Actions
+                // Actions
                 Row(
                   children: [
                     Expanded(
@@ -999,7 +1299,7 @@ class DashboardScreenState extends State<DashboardScreen>
           ),
         ),
 
-        // 4. Google Fit Setup Guide (collapsible)
+        // 3. Google Fit Setup Guide (collapsible) - MOVED TO BOTTOM
         if (_showGuide)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -1043,64 +1343,7 @@ class DashboardScreenState extends State<DashboardScreen>
             ),
           ),
 
-        // 5. Default Empty Metric Cards (Waiting state placeholders)
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              "Activity Status",
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: textColor,
-              ),
-            ),
-          ),
-        ),
-
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            childAspectRatio: 1.15,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            children: [
-              _buildPlaceholderCard(
-                "Steps",
-                "Waiting for Health Data...",
-                "🚶",
-                Colors.green,
-                isDark,
-              ),
-              _buildPlaceholderCard(
-                "Sleep",
-                "Waiting for Health Data...",
-                "🌙",
-                Colors.purple,
-                isDark,
-              ),
-              _buildPlaceholderCard(
-                "Calories",
-                "Waiting for Health Data...",
-                "🔥",
-                Colors.orange,
-                isDark,
-              ),
-              _buildPlaceholderCard(
-                "Distance",
-                "Waiting for Health Data...",
-                "📍",
-                Colors.blue,
-                isDark,
-              ),
-            ],
-          ),
-        ),
-
-        // 6. User Confirmation Card
+        // 4. User Confirmation Card - MOVED TO BOTTOM
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           child: GlassCard(
@@ -1130,7 +1373,7 @@ class DashboardScreenState extends State<DashboardScreen>
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blueAccent,
+                          backgroundColor: theme.colorScheme.primary,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -1150,7 +1393,7 @@ class DashboardScreenState extends State<DashboardScreen>
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
+                          backgroundColor: theme.colorScheme.secondary,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -1291,7 +1534,7 @@ class DashboardScreenState extends State<DashboardScreen>
 
     return Column(
       children: [
-        // 1. Verified No Data Mode Banner
+        // 2. Verified No Data Mode Banner - MOVED TO BOTTOM
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: GlassCard(
@@ -1368,166 +1611,120 @@ class DashboardScreenState extends State<DashboardScreen>
             ),
           ),
         ),
-
-        // 2. Zero Value Metric Cards
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              "Health Records (Zero Values)",
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: textColor,
-              ),
-            ),
-          ),
-        ),
-
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            childAspectRatio: 1.15,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            children: [
-              MetricCard(
-                title: "Steps",
-                value: "0",
-                unit: "steps",
-                icon: "🚶",
-                color: Colors.green,
-                progress: 0.0,
-                subtitle: "Goal: ${_stepGoal.round()}",
-              ),
-              MetricCard(
-                title: "Calories",
-                value: "0",
-                unit: "kcal",
-                icon: "🔥",
-                color: Colors.orange,
-                progress: 0.0,
-                subtitle: "Goal: ${_calorieGoal.round()}",
-              ),
-              MetricCard(
-                title: "Sleep",
-                value: "0",
-                unit: "h",
-                icon: "🌙",
-                color: Colors.purple,
-                progress: 0.0,
-                subtitle: "Goal: ${_sleepGoal.round()} hrs",
-              ),
-              MetricCard(
-                title: "Distance",
-                value: "0",
-                unit: "km",
-                icon: "📍",
-                color: Colors.blue,
-                subtitle: "Walking / Running",
-              ),
-              MetricCard(
-                title: "Move Minutes",
-                value: "0",
-                unit: "min",
-                icon: "⏱️",
-                color: Colors.cyan,
-                progress: 0.0,
-                subtitle: "Goal: ${_exerciseGoal.round()} mins",
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }
 
   Widget _buildWellnessScoreCard(ThemeData theme, bool isDark) {
     final score = _wellnessScore;
-    Color scoreColor = Colors.orange;
+    Color scoreColor = const Color(0xFFFFB03A); // Amber for Fair
     String evaluation = "Fair";
     if (score >= 80) {
-      scoreColor = Colors.green;
+      scoreColor = const Color(0xFF2EE5A3); // Mint for Excellent
       evaluation = "Excellent";
     } else if (score >= 60) {
-      scoreColor = Colors.blueAccent;
+      scoreColor = const Color(0xFFFF6D55); // Coral/Peach for Good
       evaluation = "Good";
     }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: GlassCard(
-        padding: const EdgeInsets.all(20),
-        child: Row(
+        padding: const EdgeInsets.all(18),
+        child: Column(
           children: [
-            Stack(
-              alignment: Alignment.center,
+            Row(
               children: [
-                SizedBox(
-                  width: 80,
-                  height: 80,
-                  child: CircularProgressIndicator(
-                    value: score / 100.0,
-                    strokeWidth: 8,
-                    backgroundColor: scoreColor.withOpacity(0.12),
-                    color: scoreColor,
-                    strokeCap: StrokeCap.round,
-                  ),
+                // Circular Ring with Lightning Bolt
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox(
+                      width: 64,
+                      height: 64,
+                      child: CircularProgressIndicator(
+                        value: score / 100.0,
+                        strokeWidth: 6,
+                        backgroundColor: scoreColor.withOpacity(0.12),
+                        color: scoreColor,
+                        strokeCap: StrokeCap.round,
+                      ),
+                    ),
+                    Icon(Icons.flash_on_rounded, color: scoreColor, size: 26),
+                  ],
                 ),
-                Text(
-                  "$score",
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                    color: isDark ? Colors.white : Colors.black87,
+                const SizedBox(width: 18),
+                // Text details
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "DAILY WELLNESS SCORE",
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: scoreColor,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.baseline,
+                        textBaseline: TextBaseline.alphabetic,
+                        children: [
+                          Text(
+                            "$score",
+                            style: TextStyle(
+                              fontSize: 32,
+                              fontWeight: FontWeight.w900,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          Text(
+                            " /100",
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white60 : Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(width: 20),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Your Wellness Score",
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: scoreColor.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      evaluation,
-                      style: TextStyle(
-                        color: scoreColor,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    "Calculated from steps, sleep, and water intake stats.",
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: isDark ? Colors.grey[400] : Colors.grey[600],
-                    ),
-                  ),
-                ],
-              ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12.0),
+              child: Divider(color: Colors.white10, height: 1),
+            ),
+            // Bottom 4 Sub-Scores
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildSubscoreColumn(
+                  _activeSubscore != null ? "$_activeSubscore" : "--",
+                  "Active",
+                  const Color(0xFF2EE5A3),
+                ),
+                _buildSubscoreColumn(
+                  _sleepSubscore != null ? "$_sleepSubscore" : "--",
+                  "Sleep",
+                  const Color(0xFF8F6BFF),
+                ),
+                _buildSubscoreColumn(
+                  _nutritionSubscore != null ? "$_nutritionSubscore" : "--",
+                  "Nutri",
+                  const Color(0xFFFFB03A),
+                ),
+                _buildSubscoreColumn(
+                  _mindfulnessSubscore != null ? "$_mindfulnessSubscore" : "--",
+                  "Mind",
+                  const Color(0xFF2ECAE5),
+                ),
+              ],
             ),
           ],
         ),
@@ -1535,9 +1732,34 @@ class DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  Widget _buildSubscoreColumn(String value, String label, Color color) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white54 : Colors.black54,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildAIRecommendationCard(ThemeData theme, bool isDark) {
     String recommendationText =
-        "Not enough sync data yet to generate advanced advice. Complete a full day of activity tracking to unlock personalized AI recommendation models.";
+        "Analyzing your activity and sleep logs... Syncing with advisor models...";
 
     if (_serverDailySummary != null) {
       recommendationText = _serverDailySummary!;
@@ -1557,7 +1779,7 @@ class DashboardScreenState extends State<DashboardScreen>
           children: [
             Row(
               children: [
-                const Text("🤖", style: TextStyle(fontSize: 24)),
+                Image.asset('assets/ai_buddy.png', width: 24, height: 24),
                 const SizedBox(width: 8),
                 Text(
                   "AI Wellness Advisor",
@@ -1834,33 +2056,43 @@ class DashboardScreenState extends State<DashboardScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Row(
-                    children: [
-                      Text("💧", style: TextStyle(fontSize: 28)),
-                      SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            "Water Intake",
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
-                            ),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const Text("💧", style: TextStyle(fontSize: 28)),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                "Water Intake",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18,
+                                ),
+                              ),
+                              Text(
+                                "Stay hydrated throughout the day",
+                                style: TextStyle(
+                                  color: Colors.grey[500],
+                                  fontSize: 11,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
                           ),
-                          Text(
-                            "Stay hydrated throughout the day",
-                            style: TextStyle(color: Colors.grey, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ],
+                        ),
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 8),
                   Text(
                     "${_healthData.waterIntake.round()} / ${_waterGoal.round()} ml",
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                      fontSize: 15,
                     ),
                   ),
                 ],
@@ -1895,9 +2127,18 @@ class DashboardScreenState extends State<DashboardScreen>
                   ),
                 ),
                 onPressed: () {
-                  final shellState = context
-                      .findAncestorStateOfType<MainShellState>();
-                  shellState?.setIndex(1); // Switch to Water Logging screen
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => WaterLoggingScreen(
+                        onWaterLogged: () {
+                          _fetchRealData(forceSync: false);
+                        },
+                      ),
+                    ),
+                  ).then((_) {
+                    _fetchRealData(forceSync: false);
+                  });
                 },
               ),
             ],
@@ -2253,70 +2494,94 @@ class DashboardScreenState extends State<DashboardScreen>
                 SliverToBoxAdapter(
                   child: _buildWellnessScoreCard(theme, isDark),
                 ),
-                SliverToBoxAdapter(
-                  child: _buildAIRecommendationCard(theme, isDark),
-                ),
 
-                // Daily Activity Section
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.only(
-                      left: 20,
-                      right: 20,
-                      top: 16,
-                      bottom: 8,
-                    ),
-                    child: Text(
-                      "Daily Activity",
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                  ),
-                ),
+                // Face Scan Banner
+                SliverToBoxAdapter(child: _buildFaceScanBanner(theme, isDark)),
+
+                // 2x2 Grid: Steps, Heart Rate, Calories, Sleep
                 SliverPadding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 11),
                   sliver: SliverGrid.count(
                     crossAxisCount: 2,
-                    childAspectRatio: 1.15,
+                    childAspectRatio: 1.22,
                     children: [
                       MetricCard(
                         title: "Steps",
                         value: _healthData.steps.round().toString(),
-                        unit: "steps",
-                        icon: "🚶",
-                        color: Colors.green,
-                        progress: _healthData.steps / _stepGoal,
+                        unit: "",
+                        icon: "👣",
+                        color: const Color(0xFF2EE5A3),
                         subtitle: "Goal: ${_stepGoal.round()}",
                       ),
                       MetricCard(
-                        title: "Active Energy",
-                        value: _healthData.activeCalories.round().toString(),
-                        unit: "kcal",
+                        title: "Heart Rate",
+                        value: _healthData.heartRate > 0
+                            ? "${_healthData.heartRate.round()}"
+                            : "--",
+                        unit: _healthData.heartRate > 0 ? "bpm" : "",
+                        icon: "❤️",
+                        color: const Color(0xFFFF6D55),
+                        subtitle: _healthData.heartRate > 0
+                            ? "bpm avg"
+                            : "No readings",
+                      ),
+                      MetricCard(
+                        title: "Calories",
+                        value: _healthData.activeCalories > 0
+                            ? "${_healthData.activeCalories.round()}"
+                            : "--",
+                        unit: _healthData.activeCalories > 0 ? "kcal" : "",
                         icon: "🔥",
-                        color: Colors.orange,
-                        progress: _healthData.activeCalories / _calorieGoal,
+                        color: const Color(0xFFFFB03A),
                         subtitle: "Goal: ${_calorieGoal.round()} kcal",
                       ),
                       MetricCard(
-                        title: "Sleep Duration",
-                        value: "${_healthData.sleepDuration} hrs",
+                        title: "Sleep",
+                        value: _healthData.sleepDuration > 0
+                            ? "${_healthData.sleepDuration.toInt()}h ${((_healthData.sleepDuration - _healthData.sleepDuration.toInt()) * 60).toInt()}m"
+                            : "--",
                         unit: "",
                         icon: "🌙",
-                        color: Colors.purpleAccent,
-                        progress: _healthData.sleepDuration / _sleepGoal,
+                        color: const Color(0xFF8F6BFF),
                         subtitle: "Goal: ${_sleepGoal.round()} hrs",
                       ),
                     ],
                   ),
                 ),
 
-                // Hydration (Water Intake)
+                // Water Intake Section
                 _buildWaterIntakeSliver(theme, isDark),
 
+                // Nutrition Section
+                _buildNutritionSliver(theme, isDark),
+
+                // AI Health Buddy Card
+                SliverToBoxAdapter(
+                  child: _buildAIRecommendationCard(theme, isDark),
+                ),
+
+                // Today's Plan Section
+                SliverToBoxAdapter(
+                  child: _buildTodaysPlanSection(theme, isDark),
+                ),
+
+                // Quick Access Section
+                SliverToBoxAdapter(
+                  child: _buildQuickAccessSection(theme, isDark),
+                ),
+
+                // Active Challenge Card
+                SliverToBoxAdapter(
+                  child: _buildActiveChallengeCard(theme, isDark),
+                ),
+
+                // Your Last 12 Days Graph
+                SliverToBoxAdapter(
+                  child: _buildLastDaysActivityBarGraph(theme, isDark),
+                ),
+
                 // Bottom padding
-                const SliverToBoxAdapter(child: SizedBox(height: 60)),
+                const SliverToBoxAdapter(child: SizedBox(height: 110)),
               ],
             ),
           ),
@@ -2329,6 +2594,66 @@ class DashboardScreenState extends State<DashboardScreen>
                 backgroundColor: Colors.transparent,
                 valueColor: const AlwaysStoppedAnimation<Color>(
                   Colors.blueAccent,
+                ),
+              ),
+            ),
+          if (_isSyncing && _serverWellnessScore == null)
+            Positioned.fill(
+              child: ClipRRect(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                  child: Container(
+                    color: isDark
+                        ? Colors.black.withOpacity(0.65)
+                        : Colors.white.withOpacity(0.55),
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 70,
+                            height: 70,
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.white.withOpacity(0.04)
+                                  : Colors.white,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isDark
+                                    ? Colors.white10
+                                    : Colors.black.withOpacity(0.06),
+                                width: 1.2,
+                              ),
+                            ),
+                            child: const CircularProgressIndicator(
+                              color: Color(0xFFFF6D55),
+                              strokeWidth: 3,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            "Analyzing your health telemetry...",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                              color: isDark ? Colors.white : Colors.black87,
+                              letterSpacing: -0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            "Creating your personalized dashboard",
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white54 : Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -2390,6 +2715,410 @@ class DashboardScreenState extends State<DashboardScreen>
         content: Text("Medical records access authorized!"),
         backgroundColor: Colors.green,
       ),
+    );
+  }
+
+  Widget _buildFaceScanBanner(ThemeData theme, bool isDark) {
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final secondaryTextColor = isDark ? Colors.grey[400] : Colors.grey[600];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Container(
+        height: 100,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          gradient: LinearGradient(
+            colors: isDark
+                ? [const Color(0xFF1E2836), const Color(0xFF0F1318)]
+                : [const Color(0xFFE5F1FF), Colors.white],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(
+            color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+            width: 1.3,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(22),
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          "Scan your face, ",
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: textColor,
+                          ),
+                        ),
+                        const Text(
+                          "read 9 vitals.",
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFFFF6D55),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "HR • BP • SpO2 • HRV • Stress",
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: secondaryTextColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                right: 20,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF6D55).withOpacity(0.12),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0xFFFF6D55).withOpacity(0.3),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: const Center(
+                      child: Icon(
+                        Icons.face_retouching_natural_rounded,
+                        color: Color(0xFFFF6D55),
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTodaysPlanSection(ThemeData theme, bool isDark) {
+    final labelColor = isDark ? Colors.white60 : Colors.black54;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 16,
+            bottom: 8,
+          ),
+          child: Text(
+            "TODAY'S PLAN",
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              color: labelColor,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: GlassCard(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Column(
+              children: [
+                _buildPlanItem(
+                  "🧘",
+                  "08:00",
+                  "5-min breath reset",
+                  "Mind",
+                  const Color(0xFF8F6BFF),
+                  false,
+                ),
+                const Divider(color: Colors.white10, height: 16),
+                _buildPlanItem(
+                  "🍲",
+                  "13:00",
+                  "Log your lunch",
+                  "Nutri",
+                  const Color(0xFFFFB03A),
+                  true,
+                ),
+                const Divider(color: Colors.white10, height: 16),
+                _buildPlanItem(
+                  "🏋️",
+                  "18:30",
+                  "Strength session @ Office Gym",
+                  "Move",
+                  const Color(0xFF2EE5A3),
+                  false,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPlanItem(
+    String emoji,
+    String time,
+    String title,
+    String badge,
+    Color badgeColor,
+    bool completed,
+  ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Row(
+      children: [
+        Text(emoji, style: const TextStyle(fontSize: 18)),
+        const SizedBox(width: 12),
+        Text(
+          time,
+          style: TextStyle(
+            fontSize: 11,
+            color: isDark ? Colors.white54 : Colors.black54,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: completed
+                  ? (isDark ? Colors.white30 : Colors.black38)
+                  : (isDark ? Colors.white : Colors.black87),
+              decoration: completed ? TextDecoration.lineThrough : null,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: badgeColor.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            badge,
+            style: TextStyle(
+              color: badgeColor,
+              fontSize: 9.5,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildQuickAccessSection(ThemeData theme, bool isDark) {
+    final labelColor = isDark ? Colors.white60 : Colors.black54;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 16,
+            bottom: 8,
+          ),
+          child: Text(
+            "QUICK ACCESS",
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              color: labelColor,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: GlassCard(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _buildQuickAccessItem(
+                      "📷",
+                      "Face Scan",
+                      const Color(0xFFFF6D55),
+                    ),
+                    _buildQuickAccessItem(
+                      "🍲",
+                      "Log Meal",
+                      const Color(0xFFFFB03A),
+                    ),
+                    _buildQuickAccessItem(
+                      "🩺",
+                      "Doctor",
+                      const Color(0xFFFF65A3),
+                    ),
+                    _buildQuickAccessItem(
+                      "💪",
+                      "Trainer",
+                      const Color(0xFF2EE5A3),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _buildQuickAccessItem(
+                      "🪪",
+                      "Health Card",
+                      const Color(0xFF2ECAE5),
+                    ),
+                    _buildQuickAccessItem(
+                      "🛡️",
+                      "SOS",
+                      const Color(0xFFFF3B30),
+                    ),
+                    _buildQuickAccessItem(
+                      "🏆",
+                      "Compete",
+                      const Color(0xFFFFD60A),
+                    ),
+                    _buildQuickAccessItem(
+                      "✨",
+                      "Buddy",
+                      const Color(0xFF8F6BFF),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildQuickAccessItem(String emoji, String title, Color color) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Expanded(
+      child: Column(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              shape: BoxShape.circle,
+              border: Border.all(color: color.withOpacity(0.2), width: 1.2),
+            ),
+            child: Center(
+              child: Text(emoji, style: const TextStyle(fontSize: 18)),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white70 : Colors.black87,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLastDaysActivityBarGraph(ThemeData theme, bool isDark) {
+    final labelColor = isDark ? Colors.white60 : Colors.black54;
+    final List<double> heights = [
+      0.3,
+      0.45,
+      0.2,
+      0.55,
+      0.65,
+      0.4,
+      0.75,
+      0.6,
+      0.8,
+      0.85,
+      0.7,
+      0.9,
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 16,
+            bottom: 8,
+          ),
+          child: Text(
+            "YOUR LAST 12 DAYS",
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              color: labelColor,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: GlassCard(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: SizedBox(
+              height: 45,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: heights.map((h) {
+                  return Expanded(
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 2.5),
+                      height: 45 * h,
+                      decoration: BoxDecoration(
+                        color: const Color(
+                          0xFFFFB03A,
+                        ).withOpacity(h > 0.7 ? 0.85 : 0.45),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

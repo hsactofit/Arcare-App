@@ -1,6 +1,6 @@
 # API Data Specification
 
-This document details the request bodies, query parameters, headers, and responses required by the backend API at `http://192.168.1.101:8000`.
+This document details the request bodies, query parameters, headers, and responses required by the backend API at `http://192.168.1.107:8000`.
 
 ---
 
@@ -31,6 +31,7 @@ This document details the request bodies, query parameters, headers, and respons
     "provider": "email",
     "onboarding_completed": false,
     "completed_at": null,
+    "last_sync_date": null,
     "profile": null,
     "goals": [],
     "permissions": null
@@ -61,6 +62,7 @@ This document details the request bodies, query parameters, headers, and respons
     "provider": "email",
     "onboarding_completed": true,
     "completed_at": "2026-06-28T14:00:00Z",
+    "last_sync_date": "2026-07-02T14:30:00Z",
     "profile": {
       "dob": "1995-08-15",
       "gender": "Male",
@@ -182,11 +184,22 @@ This document details the request bodies, query parameters, headers, and respons
 ```json
 {
   "wellness_score": 78,
+  "active_subscore": 92,
+  "sleep_subscore": 78,
+  "nutrition_subscore": 70,
+  "mindfulness_subscore": 85,
   "daily_summary": "You are 64% towards your daily steps goal. Your hydration levels look stable, and you got a healthy sleep duration of 7.5 hours.",
   "recommendations": [
     "Take a 10-minute active stretch after your next sit-down period.",
     "Drink a glass of water before dinner to close out your hydration targets."
   ],
+  "goals": {
+    "step_goal": 10000.0,
+    "sleep_goal": 8.0,
+    "water_goal": 2500.0,
+    "calorie_goal": 600.0,
+    "exercise_goal": 60.0
+  },
   "widgets": [
     {
       "title": "Steps",
@@ -196,5 +209,33 @@ This document details the request bodies, query parameters, headers, and respons
       "status": "active"
     }
   ]
+}
+```
+
+### 3.3 Update User Goals
+* **Path**: `POST /api/goals/update/{email}`
+* **Content-Type**: `application/json`
+* **Headers**: `Authorization: Bearer <access_token>`
+* **Request Body**:
+```json
+{
+  "step_goal": 10000.0,
+  "sleep_goal": 8.0,
+  "water_goal": 2500.0,
+  "calorie_goal": 600.0,
+  "exercise_goal": 60.0
+}
+```
+* **Response (200 OK)**:
+```json
+{
+  "message": "Goals updated successfully",
+  "goals": {
+    "step_goal": 10000.0,
+    "sleep_goal": 8.0,
+    "water_goal": 2500.0,
+    "calorie_goal": 600.0,
+    "exercise_goal": 60.0
+  }
 }
 ```

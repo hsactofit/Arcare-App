@@ -1,7 +1,10 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'dashboard_screen.dart';
-import 'water_logging_screen.dart';
+import 'challenges_screen.dart';
+import 'ai_screen.dart';
+import 'progress_screen.dart';
+import 'profile_screen.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -38,26 +41,24 @@ class MainShellState extends State<MainShell> {
             index: _currentIndex,
             children: [
               DashboardScreen(key: _dashboardKey),
-              WaterLoggingScreen(
-                onWaterLogged: () {
-                  // Trigger a refresh on the dashboard state when water is logged
-                  _dashboardKey.currentState?.refreshData();
-                },
-              ),
+              const ChallengesScreen(),
+              const AIScreen(),
+              const ProgressScreen(),
+              const ProfileScreen(),
             ],
           ),
           
           // Floating Glassmorphic Bottom Navigation Bar
           Positioned(
             bottom: 24,
-            left: 24,
-            right: 24,
+            left: 16,
+            right: 16,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(24),
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                   decoration: BoxDecoration(
                     color: isDark 
                         ? const Color(0xFF16161C).withOpacity(0.75) 
@@ -81,7 +82,10 @@ class MainShellState extends State<MainShell> {
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
                       _buildNavItem(0, Icons.home_outlined, Icons.home, "Home"),
-                      _buildNavItem(1, Icons.water_drop_outlined, Icons.water_drop, "Water"),
+                      _buildNavItem(1, Icons.emoji_events_outlined, Icons.emoji_events, "Challenges"),
+                      _buildCenterAINavItem(2),
+                      _buildNavItem(3, Icons.bar_chart_outlined, Icons.bar_chart, "Progress"),
+                      _buildNavItem(4, Icons.person_outline, Icons.person, "Profile"),
                     ],
                   ),
                 ),
@@ -95,8 +99,9 @@ class MainShellState extends State<MainShell> {
 
   Widget _buildNavItem(int index, IconData unselectedIcon, IconData selectedIcon, String label) {
     final isSelected = _currentIndex == index;
-    final activeColor = Colors.blue;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final activeColor = theme.colorScheme.primary;
+    final isDark = theme.brightness == Brightness.dark;
 
     return Expanded(
       child: GestureDetector(
@@ -113,11 +118,11 @@ class MainShellState extends State<MainShell> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeInOut,
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          margin: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          margin: const EdgeInsets.symmetric(horizontal: 2),
           decoration: BoxDecoration(
             color: isSelected 
-                ? activeColor.withOpacity(0.1) 
+                ? activeColor.withOpacity(0.08) 
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(16),
           ),
@@ -129,13 +134,13 @@ class MainShellState extends State<MainShell> {
                 color: isSelected 
                     ? activeColor 
                     : (isDark ? Colors.white54 : Colors.black54),
-                size: 24,
+                size: 22,
               ),
               const SizedBox(height: 4),
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: 10,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                   color: isSelected 
                       ? activeColor 
@@ -143,6 +148,53 @@ class MainShellState extends State<MainShell> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCenterAINavItem(int index) {
+    final isSelected = _currentIndex == index;
+    final theme = Theme.of(context);
+
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _currentIndex = index;
+        });
+      },
+      child: Container(
+        width: 48,
+        height: 48,
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            colors: [Color(0xFFFF6D55), Color(0xFF8F6BFF)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(
+            color: isSelected ? Colors.white : Colors.white38,
+            width: isSelected ? 2 : 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFFF6D55).withOpacity(isSelected ? 0.4 : 0.15),
+              blurRadius: 8,
+              spreadRadius: 1,
+              offset: const Offset(0, 3),
+            )
+          ],
+        ),
+        child: ClipOval(
+          child: Padding(
+            padding: const EdgeInsets.all(2.0),
+            child: Image.asset(
+              'assets/ai_buddy.png',
+              fit: BoxFit.cover,
+            ),
           ),
         ),
       ),
