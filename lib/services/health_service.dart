@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:health/health.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class MedicalRecord {
   final String id;
@@ -227,9 +228,59 @@ class HealthService {
   double? _localWaterIntake;
   double get localWaterIntake => _localWaterIntake ?? 0.0;
 
-  void resetLocalState() {
+  Future<void> syncWaterIntakeWithPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final todayStr = DateTime.now().toIso8601String().substring(0, 10);
+    final savedDate = prefs.getString('local_water_date');
+    if (savedDate == todayStr) {
+      _localWaterIntake = prefs.getDouble('local_water_intake_today');
+    } else {
+      _localWaterIntake = 0.0;
+      await prefs.setDouble('local_water_intake_today', 0.0);
+      await prefs.setString('local_water_date', todayStr);
+    }
+  }
+
+  Future<void> updateLocalWaterIntake(double amount) async {
+    final prefs = await SharedPreferences.getInstance();
+    final todayStr = DateTime.now().toIso8601String().substring(0, 10);
+    await syncWaterIntakeWithPrefs();
+    _localWaterIntake = (_localWaterIntake ?? 0.0) + amount;
+    await prefs.setDouble('local_water_intake_today', _localWaterIntake!);
+    await prefs.setString('local_water_date', todayStr);
+  }
+
+  Future<void> initializeWaterIntakeFromApi(double apiValue) async {
+    final prefs = await SharedPreferences.getInstance();
+    final todayStr = DateTime.now().toIso8601String().substring(0, 10);
+    final savedDate = prefs.getString('local_water_date');
+    final savedVal = prefs.getDouble('local_water_intake_today');
+    
+    if (savedDate != todayStr || savedVal == null || savedVal == 0.0) {
+      _localWaterIntake = apiValue;
+      await prefs.setDouble('local_water_intake_today', apiValue);
+      await prefs.setString('local_water_date', todayStr);
+      debugPrint("Initialized water intake from API: $apiValue ml");
+    } else {
+      debugPrint("Skipped API override: local pref already exists: $savedVal ml");
+    }
+  }
+
+  void resetLocalState() async {
     _localWaterIntake = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('local_water_intake_today');
+    await prefs.remove('local_water_date');
     debugPrint("Local health service water state reset.");
+  }
+
+  Future<void> setWaterIntakeToday(double val) async {
+    final prefs = await SharedPreferences.getInstance();
+    final todayStr = DateTime.now().toIso8601String().substring(0, 10);
+    _localWaterIntake = val;
+    await prefs.setDouble('local_water_intake_today', val);
+    await prefs.setString('local_water_date', todayStr);
+    debugPrint("Force updated local water intake cache to: $val ml");
   }
 
   static const List<HealthDataType> _medicalTypes = [
@@ -374,8 +425,7 @@ class HealthService {
   /// Log water intake locally in memory.
   Future<bool> logWater(int amountMl) async {
     try {
-      _localWaterIntake ??= 0.0;
-      _localWaterIntake = _localWaterIntake! + amountMl;
+      await updateLocalWaterIntake(amountMl.toDouble());
       debugPrint("Water logged locally: $_localWaterIntake ml");
       return true;
     } catch (e) {
@@ -613,10 +663,22 @@ class HealthService {
       }
     }
 
-    if (_localWaterIntake == null) {
+    final prefs = await SharedPreferences.getInstance();
+    final todayStr = DateTime.now().toIso8601String().substring(0, 10);
+    final savedDate = prefs.getString('local_water_date');
+    if (savedDate != todayStr) {
       _localWaterIntake = waterIntake;
+      await prefs.setDouble('local_water_intake_today', waterIntake);
+      await prefs.setString('local_water_date', todayStr);
     } else {
-      waterIntake = _localWaterIntake!;
+      final double savedVal = prefs.getDouble('local_water_intake_today') ?? 0.0;
+      if (savedVal == 0.0 && waterIntake > 0.0) {
+        _localWaterIntake = waterIntake;
+        await prefs.setDouble('local_water_intake_today', waterIntake);
+      } else {
+        _localWaterIntake = savedVal;
+        waterIntake = _localWaterIntake!;
+      }
     }
 
     return HealthData(

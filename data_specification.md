@@ -239,3 +239,100 @@ This document details the request bodies, query parameters, headers, and respons
   }
 }
 ```
+
+---
+
+## 💧 4. Water Logging Endpoints
+
+### 4.1 Fetch Last 7 Water Logs
+* **Path**: `GET /api/water/logs/{email}`
+* **Headers**: `Authorization: Bearer <access_token>`
+* **Response (200 OK)**:
+```json
+{
+  "water_intake_today": 1450,
+  "logs": [
+    {
+      "amount": 250,
+      "timestamp": "2026-07-05T17:12:55.108993"
+    },
+    {
+      "amount": 500,
+      "timestamp": "2026-07-05T08:30:00.000000"
+    }
+  ]
+}
+```
+
+### 4.2 Log Water Intake
+* **Path**: `POST /api/water/log/{email}`
+* **Content-Type**: `application/json`
+* **Headers**: `Authorization: Bearer <access_token>`
+* **Request Body**:
+```json
+{
+  "amount": 250,
+  "timestamp": "2026-07-05T10:15:30.000Z"
+}
+```
+* **Response (200 OK)**:
+```json
+{
+  "message": "Water intake logged successfully",
+  "amount": 250,
+  "timestamp": "2026-07-05T10:15:30.000Z"
+}
+```
+
+### 4.3 Water Graph API
+* **Path**: `GET /api/water/graph/{email}?period={period}`
+* **Query parameters**: `period` (values: `day`, `week`, `month`. Default: `week`)
+* **Headers**: `Authorization: Bearer <access_token>`
+* **Response (200 OK)**:
+```json
+{
+  "period": "week",
+  "data": [
+    { "label": "2026-06-29", "amount": 0 },
+    { "label": "2026-06-30", "amount": 0 },
+    { "label": "2026-07-01", "amount": 0 },
+    { "label": "2026-07-02", "amount": 0 },
+    { "label": "2026-07-03", "amount": 0 },
+    { "label": "2026-07-04", "amount": 0 },
+    { "label": "2026-07-05", "amount": 500 }
+  ]
+}
+```
+
+### 4.4 Update Water Log
+* **Path**: `PUT /api/water/log/{log_id}`
+* **Content-Type**: `application/json`
+* **Headers**: `Authorization: Bearer <access_token>`
+* **Request Body**:
+```json
+{
+  "amount": 600,
+  "timestamp": "2026-07-05T14:14:00.828100Z"
+}
+```
+* **Response (200 OK)**:
+```json
+{
+  "id": "1",
+  "message": "Water intake logged successfully",
+  "amount": 600,
+  "timestamp": "2026-07-05T14:14:00.828100Z"
+}
+```
+
+### 4.5 Delete Water Log
+* **Path**: `DELETE /api/water/log/{log_id}`
+* **Headers**: `Authorization: Bearer <access_token>`
+* **Response (200 OK)**:
+```json
+{
+  "message": "Water log deleted successfully"
+}
+```
+
+

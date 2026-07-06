@@ -76,6 +76,7 @@ The server responds with a **200 OK** containing the calculated scores and perso
 | `sleep_subscore` | `Integer` | Sleep subscore out of 100. |
 | `nutrition_subscore` | `Integer` | Nutrition subscore out of 100. |
 | `mindfulness_subscore` | `Integer` | Mindfulness subscore out of 100. |
+| `water_intake_today` | `Integer` | The daily total water volume logged by the user today (in ml). |
 | `daily_summary` | `String` | Dynamic descriptive summary text of the user's progress. |
 | `recommendations` | `List<String>` | Actionable advice strings displayed inside the AI Advisor recommendations card. |
 | `ai_buddy_message` | `String` | Dynamic, personalized message from the AI Buddy. (Cached locally to serve as the initial message in the AI tab). |
@@ -89,6 +90,7 @@ The server responds with a **200 OK** containing the calculated scores and perso
   "sleep_subscore": 78,
   "nutrition_subscore": 70,
   "mindfulness_subscore": 85,
+  "water_intake_today": 1450,
   "daily_summary": "Incredible progress! You are average 7,780 steps daily and hitting your sleep goals. Keep tracking your hydration to increase your wellness metrics.",
   "recommendations": [
     "Increase your daily water intake by 500 ml to meet standard hydration guidelines.",
@@ -180,5 +182,102 @@ Beyond passive Health Connect sensor readings, actions taken by the user inside 
 | **Meal photo/text logging** | Nutrition Subscore (`Nutri`) | Controls the Macro Balance Factor ($M$). Logging $\ge 3$ balanced meals/day sets $M = 1.0$. Repeatedly skipping meals or logging late-night snack records decays $M$ by $0.15$ per occurrence. |
 | **Mood Check-in & Stress Logs** | Mindfulness Subscore (`Mind`) | Directly populates the Stress Factor index. Logging balanced moods and normal stress levels sets the stability factor $H_{\text{stable}} = 1.0$. High stress alerts decay it unless a breathing exercise is logged. |
 | **Expert Consults & Webinars** | Multiplier / Recovery Booster | Completing a booked counsellor, doctor, or nutritionist session provides a **+5 point recovery booster** to the overall Wellness Score for that day to offset high stress/poor sleep penalties. |
+
+---
+
+## 💧 7. Hydration (Water Logging) Endpoints
+
+### 7.1 Fetch Hydration History (Last 7 Logs)
+* **Path**: `GET /api/water/logs/{email}`
+* **Headers**: `Authorization: Bearer <access_token>`
+* **Response (200 OK)**:
+```json
+{
+  "water_intake_today": 1450,
+  "logs": [
+    {
+      "amount": 250,
+      "timestamp": "2026-07-05T17:12:55.108993"
+    },
+    {
+      "amount": 500,
+      "timestamp": "2026-07-05T08:30:00.000000"
+    }
+  ]
+}
+```
+
+### 7.2 Log Daily Water Volume
+* **Path**: `POST /api/water/log/{email}`
+* **Content-Type**: `application/json`
+* **Headers**: `Authorization: Bearer <access_token>`
+* **Request Body**:
+```json
+{
+  "amount": 500,
+  "timestamp": "2026-07-05T10:20:15.000Z"
+}
+```
+* **Response (200 OK)**:
+```json
+{
+  "message": "Water intake logged successfully",
+  "amount": 500,
+  "timestamp": "2026-07-05T10:20:15.000Z"
+}
+```
+
+### 7.3 Water Graph Trend Data
+* **Path**: `GET /api/water/graph/{email}?period={period}`
+* **Query parameters**: `period` (values: `day`, `week`, `month`. Default: `week`)
+* **Headers**: `Authorization: Bearer <access_token>`
+* **Response (200 OK)**:
+```json
+{
+  "period": "week",
+  "data": [
+    { "label": "2026-06-29", "amount": 0 },
+    { "label": "2026-06-30", "amount": 0 },
+    { "label": "2026-07-01", "amount": 0 },
+    { "label": "2026-07-02", "amount": 0 },
+    { "label": "2026-07-03", "amount": 0 },
+    { "label": "2026-07-04", "amount": 0 },
+    { "label": "2026-07-05", "amount": 500 }
+  ]
+}
+```
+
+### 7.4 Update Specific Water Log
+* **Path**: `PUT /api/water/log/{log_id}`
+* **Content-Type**: `application/json`
+* **Headers**: `Authorization: Bearer <access_token>`
+* **Request Body**:
+```json
+{
+  "amount": 600,
+  "timestamp": "2026-07-05T14:14:00.828100Z"
+}
+```
+* **Response (200 OK)**:
+```json
+{
+  "id": "1",
+  "message": "Water intake logged successfully",
+  "amount": 600,
+  "timestamp": "2026-07-05T14:14:00.828100Z"
+}
+```
+
+### 7.5 Delete Specific Water Log
+* **Path**: `DELETE /api/water/log/{log_id}`
+* **Headers**: `Authorization: Bearer <access_token>`
+* **Response (200 OK)**:
+```json
+{
+  "message": "Water log deleted successfully"
+}
+```
+
+
 
 

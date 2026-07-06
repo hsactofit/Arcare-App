@@ -151,9 +151,13 @@ class DashboardScreenState extends State<DashboardScreen>
                 final messenger = ScaffoldMessenger.of(context);
                 setState(() {
                   if (metric == "Water") {
+                    final int amount = val.round();
                     _healthData = _healthData.copyWith(
-                      waterIntake: _healthData.waterIntake + val,
+                      waterIntake: _healthData.waterIntake + amount.toDouble(),
                     );
+                    HealthService.instance.logWater(amount).then((_) {
+                      _syncManualWaterToApi(amount);
+                    });
                   } else if (metric == "Weight") {
                     _healthData = _healthData.copyWith(weight: val);
                   } else if (metric == "Sleep") {
@@ -178,6 +182,53 @@ class DashboardScreenState extends State<DashboardScreen>
         ],
       ),
     );
+  }
+
+  Future<void> _syncManualWaterToApi(int amount) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString('onboarding_data');
+      if (jsonStr != null) {
+        final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
+        final email = onboarding['auth']?['email'];
+        if (email != null) {
+          final token = await AuthService.instance.getAccessToken();
+          final url =
+              '${AuthService.apiBaseUrl}/api/water/log/${Uri.encodeComponent(email)}';
+          final now = DateTime.now();
+
+          var response = await http.post(
+            Uri.parse(url),
+            headers: {
+              'Content-Type': 'application/json',
+              if (token != null) 'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({
+              'amount': amount,
+              'timestamp': now.toIso8601String(),
+            }),
+          );
+
+          if (response.statusCode == 401) {
+            await AuthService.instance.refreshSessionToken();
+            final newToken = await AuthService.instance.getAccessToken();
+            response = await http.post(
+              Uri.parse(url),
+              headers: {
+                'Content-Type': 'application/json',
+                if (newToken != null) 'Authorization': 'Bearer $newToken',
+              },
+              body: jsonEncode({
+                'amount': amount,
+                'timestamp': now.toIso8601String(),
+              }),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("Error syncing manual logged water: $e");
+    }
   }
 
   Future<void> _checkStatusAndSync() async {
@@ -314,6 +365,12 @@ class DashboardScreenState extends State<DashboardScreen>
             final syncData = await HealthService.instance
                 .fetchDailyHealthDataForPeriod(days: 7);
             await _syncAndRefreshDashboard(email, syncData);
+
+            // Re-load local health data so waterIntake from initializeWaterIntakeFromApi is mapped
+            final updatedData = await HealthService.instance.fetchHealthData();
+            setState(() {
+              _healthData = updatedData;
+            });
           }
         }
       } else {
@@ -370,6 +427,9 @@ class DashboardScreenState extends State<DashboardScreen>
         final int sleepSub = resData['sleep_subscore'] ?? 0;
         final int nutriSub = resData['nutrition_subscore'] ?? 0;
         final int mindSub = resData['mindfulness_subscore'] ?? 0;
+        final int apiWaterToday = resData['water_intake_today'] ?? 0;
+
+        await HealthService.instance.initializeWaterIntakeFromApi(apiWaterToday.toDouble());
 
         setState(() {
           _serverWellnessScore = score;
