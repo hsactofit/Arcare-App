@@ -136,7 +136,7 @@ class AuthService {
   }
 
   // Base API URL
-  static const String apiBaseUrl = 'http://192.168.1.107:8000';
+  static const String apiBaseUrl = 'http://api.prabhash.site';
 
   // Signup API
   Future<Map<String, dynamic>> signUpWithEmail(

@@ -225,6 +225,10 @@ class HealthService {
   bool _isMedicalConsented = false;
   bool get isMedicalConsented => _isMedicalConsented;
 
+  HealthData? _cachedHealthData;
+  DateTime? _lastFetchTime;
+  static const Duration _cacheDuration = Duration(seconds: 30);
+
   double? _localWaterIntake;
   double get localWaterIntake => _localWaterIntake ?? 0.0;
 
@@ -268,6 +272,8 @@ class HealthService {
 
   void resetLocalState() async {
     _localWaterIntake = null;
+    _cachedHealthData = null;
+    _lastFetchTime = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('local_water_intake_today');
     await prefs.remove('local_water_date');
@@ -435,7 +441,15 @@ class HealthService {
   }
 
   /// Fetch health data for the current day (last 24 hours).
-  Future<HealthData> fetchHealthData() async {
+  Future<HealthData> fetchHealthData({bool forceRefresh = false}) async {
+    if (!forceRefresh && _cachedHealthData != null && _lastFetchTime != null) {
+      final elapsed = DateTime.now().difference(_lastFetchTime!);
+      if (elapsed < _cacheDuration) {
+        debugPrint("Returning cached HealthData (age: ${elapsed.inSeconds}s)");
+        return _cachedHealthData!;
+      }
+    }
+
     await initialize();
 
     final now = DateTime.now();
@@ -468,32 +482,42 @@ class HealthService {
 
     try {
       final List<HealthDataPoint> data = [];
-      for (final type in readTypes) {
-        try {
+      try {
         final typeData = await _health.getHealthDataFromTypes(
           startTime: startOfDay,
           endTime: now,
-          types: [type],
+          types: readTypes,
         );
         data.addAll(typeData);
       } catch (e) {
-        debugPrint("Error fetching health data type $type: $e");
+        debugPrint("Error fetching health data in batch: $e. Falling back to sequential fetching.");
+        for (final type in readTypes) {
+          try {
+            final typeData = await _health.getHealthDataFromTypes(
+              startTime: startOfDay,
+              endTime: now,
+              types: [type],
+            );
+            data.addAll(typeData);
+          } catch (err) {
+            debugPrint("Error fetching health data type $type: $err");
+          }
+        }
       }
-    }
 
-    final List<HealthDataPoint> sleepData = [];
-    try {
-      final sleepTypeData = await _health.getHealthDataFromTypes(
-        startTime: startOfSleep,
-        endTime: now,
-        types: [HealthDataType.SLEEP_ASLEEP],
-      );
-      sleepData.addAll(sleepTypeData);
-    } catch (e) {
-      debugPrint("Error fetching sleep data: $e");
-    }
+      final List<HealthDataPoint> sleepData = [];
+      try {
+        final sleepTypeData = await _health.getHealthDataFromTypes(
+          startTime: startOfSleep,
+          endTime: now,
+          types: [HealthDataType.SLEEP_ASLEEP],
+        );
+        sleepData.addAll(sleepTypeData);
+      } catch (e) {
+        debugPrint("Error fetching sleep data: $e");
+      }
 
-    try {
+      try {
         int? stepCount = await _health.getTotalStepsInInterval(startOfDay, now);
         if (stepCount != null) {
           steps = stepCount.toDouble();
@@ -502,13 +526,14 @@ class HealthService {
         debugPrint("Error getting aggregated steps: $e");
       }
 
+      double fallbackSteps = 0.0;
       for (var point in data) {
         final double? val = _extractDoubleValue(point);
         if (val == null) continue;
 
         switch (point.type) {
           case HealthDataType.STEPS:
-            if (steps == 0.0) steps += val;
+            fallbackSteps += val;
             break;
           case HealthDataType.DISTANCE_DELTA:
             distance += val / 1000.0;
@@ -568,6 +593,10 @@ class HealthService {
           default:
             break;
         }
+      }
+
+      if (steps == 0.0) {
+        steps = fallbackSteps;
       }
 
       double sleepMins = 0;
@@ -681,7 +710,7 @@ class HealthService {
       }
     }
 
-    return HealthData(
+    final result = HealthData(
       steps: steps.roundToDouble(),
       distance: double.parse(distance.toStringAsFixed(2)),
       activeCalories: activeCalories.roundToDouble(),
@@ -708,6 +737,10 @@ class HealthService {
       medicalRecordsConsented: _isMedicalConsented,
       medicalRecords: medicalRecords,
     );
+
+    _cachedHealthData = result;
+    _lastFetchTime = DateTime.now();
+    return result;
   }
 
   /// Fetch health data for the last X days (maximum 7 days as requested).
@@ -768,13 +801,14 @@ class HealthService {
       double heartRateSum = 0.0;
       int heartRateCount = 0;
 
+      double fallbackSteps = 0.0;
       for (var point in data) {
         final double? val = _extractDoubleValue(point);
         if (val == null) continue;
 
         switch (point.type) {
           case HealthDataType.STEPS:
-            if (steps == 0.0) steps += val;
+            fallbackSteps += val;
             break;
           case HealthDataType.DISTANCE_DELTA:
             distance += val / 1000.0;
@@ -837,6 +871,10 @@ class HealthService {
         }
       }
 
+      if (steps == 0.0) {
+        steps = fallbackSteps;
+      }
+
       if (heartRateCount > 0) {
         heartRate = heartRateSum / heartRateCount;
       }
@@ -891,6 +929,58 @@ class HealthService {
     final now = DateTime.now();
     final List<Map<String, dynamic>> dailyRecords = [];
 
+    // Calculate the start of the overall period (X days ago at 00:00:00)
+    final startOfPeriod = DateTime(now.year, now.month, now.day).subtract(Duration(days: days - 1));
+    final startOfSleepPeriod = startOfPeriod.subtract(const Duration(hours: 12));
+
+    final typesToFetch = [
+      HealthDataType.STEPS,
+      HealthDataType.ACTIVE_ENERGY_BURNED,
+      HealthDataType.BASAL_ENERGY_BURNED,
+      HealthDataType.HEART_RATE,
+      HealthDataType.WATER,
+      HealthDataType.WORKOUT,
+    ];
+
+    // Fetch all health data for the entire period in a single batch
+    final List<HealthDataPoint> allHealthData = [];
+    try {
+      final periodData = await _health.getHealthDataFromTypes(
+        startTime: startOfPeriod,
+        endTime: now,
+        types: typesToFetch,
+      );
+      allHealthData.addAll(periodData);
+    } catch (e) {
+      debugPrint("Error fetching daily health data in batch: $e. Falling back to sequential fetching.");
+      // Fallback: fetch type by type for the entire period
+      for (final type in typesToFetch) {
+        try {
+          final typeData = await _health.getHealthDataFromTypes(
+            startTime: startOfPeriod,
+            endTime: now,
+            types: [type],
+          );
+          allHealthData.addAll(typeData);
+        } catch (err) {
+          debugPrint("Error fetching daily health data type $type in fallback: $err");
+        }
+      }
+    }
+
+    // Fetch all sleep data for the entire period in a single batch
+    final List<HealthDataPoint> allSleepData = [];
+    try {
+      final sleepTypeData = await _health.getHealthDataFromTypes(
+        startTime: startOfSleepPeriod,
+        endTime: now,
+        types: [HealthDataType.SLEEP_ASLEEP],
+      );
+      allSleepData.addAll(sleepTypeData);
+    } catch (e) {
+      debugPrint("Error fetching daily sleep data in batch: $e");
+    }
+
     for (int i = 0; i < days; i++) {
       final targetDate = DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
       final startTime = targetDate;
@@ -906,41 +996,7 @@ class HealthService {
       double waterIntake = 0.0;
 
       try {
-        final List<HealthDataPoint> data = [];
-        final typesToFetch = [
-          HealthDataType.STEPS,
-          HealthDataType.ACTIVE_ENERGY_BURNED,
-          HealthDataType.BASAL_ENERGY_BURNED,
-          HealthDataType.HEART_RATE,
-          HealthDataType.WATER,
-          HealthDataType.WORKOUT,
-        ];
-
-      for (final type in typesToFetch) {
-        try {
-          final typeData = await _health.getHealthDataFromTypes(
-            startTime: startTime,
-            endTime: endTime,
-            types: [type],
-          );
-          data.addAll(typeData);
-        } catch (e) {
-          debugPrint("Error fetching daily health data type $type: $e");
-        }
-      }
-
-      final List<HealthDataPoint> sleepData = [];
-      try {
-        final sleepTypeData = await _health.getHealthDataFromTypes(
-          startTime: startTime.subtract(const Duration(hours: 12)),
-          endTime: endTime,
-          types: [HealthDataType.SLEEP_ASLEEP],
-        );
-        sleepData.addAll(sleepTypeData);
-      } catch (e) {
-        debugPrint("Error fetching daily sleep data: $e");
-      }
-
+        // Query daily steps for accurate aggregation
         try {
           int? stepCount = await _health.getTotalStepsInInterval(startTime, endTime);
           if (stepCount != null) {
@@ -950,16 +1006,23 @@ class HealthService {
           debugPrint("Error getting steps for $dateString: $e");
         }
 
+        // Filter the fetched batch data points that fall within this day's start/end times
+        final dayData = allHealthData.where((point) {
+          return point.dateFrom.isAfter(startTime.subtract(const Duration(seconds: 1))) &&
+                 point.dateFrom.isBefore(endTime.add(const Duration(seconds: 1)));
+        }).toList();
+
         double heartRateSum = 0.0;
         int heartRateCount = 0;
+        double fallbackSteps = 0.0;
 
-        for (var point in data) {
+        for (var point in dayData) {
           final double? val = _extractDoubleValue(point);
           if (val == null) continue;
 
           switch (point.type) {
             case HealthDataType.STEPS:
-              if (steps == 0.0) steps += val;
+              fallbackSteps += val;
               break;
             case HealthDataType.ACTIVE_ENERGY_BURNED:
               activeCalories += val;
@@ -982,12 +1045,17 @@ class HealthService {
           }
         }
 
+        if (steps == 0.0) {
+          steps = fallbackSteps;
+        }
+
         if (heartRateCount > 0) {
           heartRate = heartRateSum / heartRateCount;
         }
 
+        // Process sleep duration for this day (sleep dateTo lands on this day)
         double sleepMins = 0;
-        for (var point in sleepData) {
+        for (var point in allSleepData) {
           if (point.type == HealthDataType.SLEEP_ASLEEP) {
             if (point.dateTo.year == targetDate.year &&
                 point.dateTo.month == targetDate.month &&
@@ -999,7 +1067,7 @@ class HealthService {
         sleepDuration = sleepMins / 60.0;
 
       } catch (e) {
-        debugPrint("Error fetching health data for $dateString: $e");
+        debugPrint("Error processing health data for $dateString: $e");
       }
 
       dailyRecords.add({

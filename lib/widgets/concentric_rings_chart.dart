@@ -62,10 +62,14 @@ class _ConcentricRingsChartState extends State<ConcentricRingsChart>
     }
   }
 
-  bool _hasDataChanged(List<ConcentricRingData> oldList, List<ConcentricRingData> newList) {
+  bool _hasDataChanged(
+    List<ConcentricRingData> oldList,
+    List<ConcentricRingData> newList,
+  ) {
     if (oldList.length != newList.length) return true;
     for (int i = 0; i < oldList.length; i++) {
-      if (oldList[i].value != newList[i].value || oldList[i].color != newList[i].color) {
+      if (oldList[i].value != newList[i].value ||
+          oldList[i].color != newList[i].color) {
         return true;
       }
     }
@@ -115,10 +119,10 @@ class ConcentricRingsPainter extends CustomPainter {
   final double strokeWidth;
   final double ringSpacing;
   final bool isDark;
-  
+
   // Angle at which the rings end (3 o'clock / 0 degrees)
   final double endAngle = 0.0;
-  
+
   // The sweep angle covering exactly 270 degrees (leaving a 90-degree/quarter gap at the bottom-right)
   final double maxSweepAngle = 270 * math.pi / 180;
 
@@ -137,9 +141,12 @@ class ConcentricRingsPainter extends CustomPainter {
 
     for (int i = 0; i < rings.length; i++) {
       final ring = rings[i];
-      
+
       // Calculate radius of this concentric ring (from outer to inner)
-      final radius = (circleSize / 2) - (i * (strokeWidth + ringSpacing)) - (strokeWidth / 2);
+      final radius =
+          (circleSize / 2) -
+          (i * (strokeWidth + ringSpacing)) -
+          (strokeWidth / 2);
       if (radius <= 0) continue;
 
       final rect = Rect.fromCircle(center: center, radius: radius);
@@ -172,13 +179,7 @@ class ConcentricRingsPainter extends CustomPainter {
         final sweepAngle = progressValue * maxSweepAngle;
 
         // Draw progress arc sweeping counter-clockwise from endAngle
-        canvas.drawArc(
-          rect,
-          endAngle,
-          -sweepAngle,
-          false,
-          progressPaint,
-        );
+        canvas.drawArc(rect, endAngle, -sweepAngle, false, progressPaint);
       }
     }
   }

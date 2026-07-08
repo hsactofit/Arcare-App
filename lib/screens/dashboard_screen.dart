@@ -2491,7 +2491,9 @@ class DashboardScreenState extends State<DashboardScreen>
         children: [
           MetricCard(
             title: "Sleep Duration",
-            value: "${_healthData.sleepDuration} hrs",
+            value: _healthData.sleepDuration > 0
+                ? "${_healthData.sleepDuration} hrs"
+                : "--",
             unit: "",
             icon: "🌙",
             color: Colors.purpleAccent,
@@ -2673,7 +2675,9 @@ class DashboardScreenState extends State<DashboardScreen>
                     children: [
                       MetricCard(
                         title: "Steps",
-                        value: _healthData.steps.round().toString(),
+                        value: _healthData.steps > 0
+                            ? _healthData.steps.round().toString()
+                            : "--",
                         unit: "",
                         icon: "👣",
                         color: const Color(0xFF2EE5A3),

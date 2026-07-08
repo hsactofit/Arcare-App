@@ -1,6 +1,6 @@
 # API Data Specification
 
-This document details the request bodies, query parameters, headers, and responses required by the backend API at `http://192.168.1.107:8000`.
+This document details the request bodies, query parameters, headers, and responses required by the backend API at `http://api.prabhash.site`.
 
 ---
 

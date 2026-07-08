@@ -90,6 +90,17 @@ class MetricCard extends StatelessWidget {
   });
 
   List<double> _getMockDataForType() {
+    final cleanValue = value.trim();
+    if (cleanValue == "--" ||
+        cleanValue == "--/--" ||
+        cleanValue == "0" ||
+        cleanValue == "0.0" ||
+        cleanValue.startsWith("0h") ||
+        cleanValue.startsWith("0.0 hrs") ||
+        cleanValue.isEmpty) {
+      return [1.0, 1.0];
+    }
+
     final cleanTitle = title.toLowerCase();
     if (cleanTitle.contains("step")) {
       return [4200, 5100, 4800, 6900, 5800, 7200, 8432];
