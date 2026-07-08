@@ -8,11 +8,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/health_service.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/metric_card.dart';
+import '../widgets/concentric_rings_chart.dart';
 import '../widgets/medical/medical_records_section.dart';
 import '../widgets/medical/medical_consent_sheet.dart';
 import 'package:http/http.dart' as http;
 import '../services/auth_service.dart';
-import 'main_shell.dart';
 import 'onboarding_screen.dart';
 import 'water_logging_screen.dart';
 
@@ -119,6 +119,37 @@ class DashboardScreenState extends State<DashboardScreen>
       score += (_healthData.waterIntake / _waterGoal) * 20.0;
     }
     return score.clamp(0, 100).round();
+  }
+
+  int get _activeSubscoreValue {
+    if (_activeSubscore != null) return _activeSubscore!;
+    if (_healthData.steps > 0) {
+      return (_healthData.steps / _stepGoal * 100).clamp(0, 100).round();
+    }
+    return 0;
+  }
+
+  int get _sleepSubscoreValue {
+    if (_sleepSubscore != null) return _sleepSubscore!;
+    if (_healthData.sleepDuration > 0) {
+      return (_healthData.sleepDuration / _sleepGoal * 100)
+          .clamp(0, 100)
+          .round();
+    }
+    return 0;
+  }
+
+  int get _nutritionSubscoreValue {
+    if (_nutritionSubscore != null) return _nutritionSubscore!;
+    if (_healthData.waterIntake > 0) {
+      return (_healthData.waterIntake / _waterGoal * 100).clamp(0, 100).round();
+    }
+    return 0;
+  }
+
+  int get _mindfulnessSubscoreValue {
+    if (_mindfulnessSubscore != null) return _mindfulnessSubscore!;
+    return 0;
   }
 
   void _showManualLogDialog(String metric) {
@@ -429,7 +460,9 @@ class DashboardScreenState extends State<DashboardScreen>
         final int mindSub = resData['mindfulness_subscore'] ?? 0;
         final int apiWaterToday = resData['water_intake_today'] ?? 0;
 
-        await HealthService.instance.initializeWaterIntakeFromApi(apiWaterToday.toDouble());
+        await HealthService.instance.initializeWaterIntakeFromApi(
+          apiWaterToday.toDouble(),
+        );
 
         setState(() {
           _serverWellnessScore = score;
@@ -1675,6 +1708,29 @@ class DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  Widget _buildLegendItem(String label, Color color, bool isDark) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w700,
+            color: isDark ? Colors.white60 : Colors.black54,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildWellnessScoreCard(ThemeData theme, bool isDark) {
     final score = _wellnessScore;
     Color scoreColor = const Color(0xFFFFB03A); // Amber for Fair
@@ -1687,133 +1743,183 @@ class DashboardScreenState extends State<DashboardScreen>
       evaluation = "Good";
     }
 
+    final ringsData = [
+      ConcentricRingData(
+        value: _activeSubscoreValue / 100.0,
+        color: const Color(0xFF2EE5A3),
+        label: "Active",
+      ),
+      ConcentricRingData(
+        value: _sleepSubscoreValue / 100.0,
+        color: const Color(0xFF8F6BFF),
+        label: "Sleep",
+      ),
+      ConcentricRingData(
+        value: _nutritionSubscoreValue / 100.0,
+        color: const Color(0xFFFFB03A),
+        label: "Nutrition",
+      ),
+      ConcentricRingData(
+        value: _mindfulnessSubscoreValue / 100.0,
+        color: const Color(0xFF2ECAE5),
+        label: "Mindfulness",
+      ),
+    ];
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: GlassCard(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
         child: Column(
           children: [
+            // Header row with card title and evaluation badge
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Circular Ring with Lightning Bolt
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    SizedBox(
-                      width: 64,
-                      height: 64,
-                      child: CircularProgressIndicator(
-                        value: score / 100.0,
-                        strokeWidth: 6,
-                        backgroundColor: scoreColor.withOpacity(0.12),
-                        color: scoreColor,
-                        strokeCap: StrokeCap.round,
-                      ),
-                    ),
-                    Icon(Icons.flash_on_rounded, color: scoreColor, size: 26),
-                  ],
+                Text(
+                  "DAILY WELLNESS",
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    color: isDark ? Colors.white60 : Colors.black54,
+                    letterSpacing: 0.8,
+                  ),
                 ),
-                const SizedBox(width: 18),
-                // Text details
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scoreColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: scoreColor.withValues(alpha: 0.3),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        "DAILY WELLNESS SCORE",
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
                           color: scoreColor,
-                          letterSpacing: 0.8,
+                          shape: BoxShape.circle,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.baseline,
-                        textBaseline: TextBaseline.alphabetic,
-                        children: [
-                          Text(
-                            "$score",
-                            style: TextStyle(
-                              fontSize: 32,
-                              fontWeight: FontWeight.w900,
-                              color: isDark ? Colors.white : Colors.black87,
-                            ),
-                          ),
-                          Text(
-                            " /100",
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.white60 : Colors.black54,
-                            ),
-                          ),
-                        ],
+                      const SizedBox(width: 6),
+                      Text(
+                        evaluation.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          color: scoreColor,
+                          letterSpacing: 0.5,
+                        ),
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12.0),
-              child: Divider(color: Colors.white10, height: 1),
+            const SizedBox(height: 16),
+            // Centered Stack combining the concentric rings chart and the score inside its bottom-right gap
+            SizedBox(
+              width: 170,
+              height: 145,
+              child: Stack(
+                children: [
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    child: ConcentricRingsChart(rings: ringsData),
+                  ),
+                  Positioned(
+                    left:
+                        82, // Positioned inside the bottom-right gap (x > 70, y > 70)
+                    top: 76,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            Text(
+                              "$score",
+                              style: TextStyle(
+                                fontSize: 38,
+                                fontWeight: FontWeight.w900,
+                                color: isDark ? Colors.white : Colors.black87,
+                                height: 1.0,
+                              ),
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              "/100",
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white60 : Colors.black54,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          "Wellness Score",
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                            color: isDark ? Colors.white54 : Colors.black54,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-            // Bottom 4 Sub-Scores
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+            const SizedBox(height: 8),
+            Divider(
+              color: isDark ? Colors.white10 : Colors.black12,
+              height: 32,
+              thickness: 1,
+            ),
+            // Bottom Legend
+            Wrap(
+              spacing: 20,
+              runSpacing: 10,
+              alignment: WrapAlignment.center,
               children: [
-                _buildSubscoreColumn(
-                  _activeSubscore != null ? "$_activeSubscore" : "--",
-                  "Active",
+                _buildLegendItem(
+                  "Active: ${_activeSubscoreValue}%",
                   const Color(0xFF2EE5A3),
+                  isDark,
                 ),
-                _buildSubscoreColumn(
-                  _sleepSubscore != null ? "$_sleepSubscore" : "--",
-                  "Sleep",
+                _buildLegendItem(
+                  "Sleep: ${_sleepSubscoreValue}%",
                   const Color(0xFF8F6BFF),
+                  isDark,
                 ),
-                _buildSubscoreColumn(
-                  _nutritionSubscore != null ? "$_nutritionSubscore" : "--",
-                  "Nutri",
+                _buildLegendItem(
+                  "Nutrition: ${_nutritionSubscoreValue}%",
                   const Color(0xFFFFB03A),
+                  isDark,
                 ),
-                _buildSubscoreColumn(
-                  _mindfulnessSubscore != null ? "$_mindfulnessSubscore" : "--",
-                  "Mind",
+                _buildLegendItem(
+                  "Mind: ${_mindfulnessSubscoreValue}%",
                   const Color(0xFF2ECAE5),
+                  isDark,
                 ),
               ],
             ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildSubscoreColumn(String value, String label, Color color) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Column(
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w900,
-            color: color,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white54 : Colors.black54,
-          ),
-        ),
-      ],
     );
   }
 
@@ -3116,69 +3222,161 @@ class DashboardScreenState extends State<DashboardScreen>
 
   Widget _buildLastDaysActivityBarGraph(ThemeData theme, bool isDark) {
     final labelColor = isDark ? Colors.white60 : Colors.black54;
-    final List<double> heights = [
-      0.3,
-      0.45,
-      0.2,
-      0.55,
-      0.65,
-      0.4,
-      0.75,
-      0.6,
-      0.8,
-      0.85,
-      0.7,
-      0.9,
-    ];
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 16,
-            bottom: 8,
-          ),
-          child: Text(
-            "YOUR LAST 12 DAYS",
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w900,
-              color: labelColor,
-              letterSpacing: 0.8,
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: GlassCard(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: SizedBox(
-              height: 45,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: heights.map((h) {
-                  return Expanded(
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 2.5),
-                      height: 45 * h,
-                      decoration: BoxDecoration(
-                        color: const Color(
-                          0xFFFFB03A,
-                        ).withOpacity(h > 0.7 ? 0.85 : 0.45),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  );
-                }).toList(),
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: HealthService.instance.fetchDailyHealthDataForPeriod(days: 7),
+      builder: (context, snapshot) {
+        List<Map<String, dynamic>> records = [];
+        bool isLoading = true;
+
+        if (snapshot.connectionState == ConnectionState.done &&
+            snapshot.hasData) {
+          records = snapshot.data!.reversed.toList();
+          isLoading = false;
+        }
+
+        // If loading or empty, show 7 placeholder bars with default values
+        if (isLoading || records.isEmpty) {
+          records = List.generate(7, (index) {
+            final date = DateTime.now().subtract(Duration(days: 6 - index));
+            return {
+              'date':
+                  "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}",
+              'steps': 0,
+            };
+          });
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 16,
+                bottom: 8,
+              ),
+              child: Text(
+                "YOUR LAST 7 DAYS",
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  color: labelColor,
+                  letterSpacing: 0.8,
+                ),
               ),
             ),
-          ),
-        ),
-      ],
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: GlassCard(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 16,
+                ),
+                child: SizedBox(
+                  height: 75,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: records.map((record) {
+                      final double steps = (record['steps'] as num).toDouble();
+                      final fraction = (steps / _stepGoal).clamp(0.06, 1.0);
+
+                      final dateStr = record['date'] as String;
+                      final date = DateTime.tryParse(dateStr) ?? DateTime.now();
+                      final weekdayStr = [
+                        "M",
+                        "T",
+                        "W",
+                        "T",
+                        "F",
+                        "S",
+                        "S",
+                      ][date.weekday - 1];
+
+                      // Is today?
+                      final isToday =
+                          date.day == DateTime.now().day &&
+                          date.month == DateTime.now().month &&
+                          date.year == DateTime.now().year;
+
+                      return Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            // The actual bar
+                            Expanded(
+                              child: Align(
+                                alignment: Alignment.bottomCenter,
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 5,
+                                  ),
+                                  height: 50 * fraction,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.bottomCenter,
+                                      end: Alignment.topCenter,
+                                      colors: isToday
+                                          ? [
+                                              const Color(0xFF2EE5A3),
+                                              const Color(
+                                                0xFF2EE5A3,
+                                              ).withValues(alpha: 0.9),
+                                            ]
+                                          : [
+                                              const Color(
+                                                0xFF2EE5A3,
+                                              ).withValues(alpha: 0.45),
+                                              const Color(
+                                                0xFF2EE5A3,
+                                              ).withValues(alpha: 0.75),
+                                            ],
+                                    ),
+                                    borderRadius: BorderRadius.circular(4),
+                                    boxShadow: isToday
+                                        ? [
+                                            BoxShadow(
+                                              color: const Color(
+                                                0xFF2EE5A3,
+                                              ).withValues(alpha: 0.3),
+                                              blurRadius: 6,
+                                              spreadRadius: 1,
+                                            ),
+                                          ]
+                                        : null,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            // Weekday Label
+                            Text(
+                              weekdayStr,
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: isToday
+                                    ? FontWeight.w900
+                                    : FontWeight.w700,
+                                color: isToday
+                                    ? const Color(0xFF2EE5A3)
+                                    : (isDark
+                                          ? Colors.white54
+                                          : Colors.black54),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
