@@ -77,6 +77,7 @@ class MetricCard extends StatelessWidget {
   final Color color;
   final double? progress;
   final String subtitle;
+  final VoidCallback? onTap;
 
   const MetricCard({
     super.key,
@@ -87,6 +88,7 @@ class MetricCard extends StatelessWidget {
     required this.color,
     this.progress,
     required this.subtitle,
+    this.onTap,
   });
 
   List<double> _getMockDataForType() {
@@ -124,7 +126,7 @@ class MetricCard extends StatelessWidget {
 
     final mockDataset = _getMockDataForType();
 
-    return GlassCard(
+    final card = GlassCard(
       padding: const EdgeInsets.all(12),
       margin: const EdgeInsets.all(5),
       child: Column(
@@ -203,5 +205,16 @@ class MetricCard extends StatelessWidget {
         ],
       ),
     );
+
+    if (onTap != null) {
+      return GestureDetector(
+        onTap: onTap,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: card,
+        ),
+      );
+    }
+    return card;
   }
 }

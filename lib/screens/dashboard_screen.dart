@@ -15,6 +15,7 @@ import 'package:http/http.dart' as http;
 import '../services/auth_service.dart';
 import 'onboarding_screen.dart';
 import 'water_logging_screen.dart';
+import 'metric_detail_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -43,6 +44,7 @@ class DashboardScreenState extends State<DashboardScreen>
   bool _healthSetupCompleted = false;
   bool _healthConnectRequested = false;
   bool _showGuide = false;
+  bool _dismissedSetupCard = false;
 
   // Server-synced states
   int? _serverWellnessScore;
@@ -66,6 +68,7 @@ class DashboardScreenState extends State<DashboardScreen>
       _healthSetupCompleted = prefs.getBool('healthSetupCompleted') ?? false;
       _healthConnectRequested =
           prefs.getBool('healthConnectRequested') ?? false;
+      _dismissedSetupCard = prefs.getBool('dismissedSetupCard') ?? false;
       _userName = prefs.getString('user_name') ?? "User";
 
       // Load custom goals configuration
@@ -74,6 +77,14 @@ class DashboardScreenState extends State<DashboardScreen>
       _calorieGoal = prefs.getDouble('goal_calories') ?? 600.0;
       _exerciseGoal = prefs.getDouble('goal_exercise') ?? 60.0;
       _sleepGoal = prefs.getDouble('goal_sleep') ?? 8.0;
+    });
+  }
+
+  Future<void> _setDismissedSetupCard(bool val) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('dismissedSetupCard', val);
+    setState(() {
+      _dismissedSetupCard = val;
     });
   }
 
@@ -1277,241 +1288,130 @@ class DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildState3SubModeA(ThemeData theme, bool isDark) {
+    return _buildSmallSetupGuideCard(theme, isDark);
+  }
+
+  Widget _buildSmallSetupGuideCard(ThemeData theme, bool isDark) {
+    if (_dismissedSetupCard) return const SizedBox.shrink();
+
     final textColor = isDark ? Colors.white : Colors.black87;
-    final secondaryTextColor = isDark ? Colors.grey[400] : Colors.grey[600];
-
-    return Column(
-      children: [
-        // 2. Dashboard Banner (Info Section) - MOVED TO BOTTOM
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: GlassCard(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    const Text("🎉", style: TextStyle(fontSize: 32)),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        "You're Almost Ready!",
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: textColor,
-                          fontSize: 18,
-                        ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: GlassCard(
+        padding: EdgeInsets.zero,
+        margin: EdgeInsets.zero,
+        borderRadius: 16,
+        child: Row(
+          children: [
+            Expanded(
+              child: InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => GoogleFitSetupGuideScreen(
+                        isDark: isDark,
+                        onRefresh: () => _syncData(),
                       ),
                     ),
-                  ],
+                  );
+                },
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  bottomLeft: Radius.circular(16),
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  "Health Connect has been connected successfully. However, we couldn't find any health data. Connect a supported fitness application (Google Fit, Samsung Health, Fitbit, Garmin, Mi Fitness, etc.) and allow it to sync with Health Connect.",
-                  style: TextStyle(
-                    color: secondaryTextColor,
-                    fontSize: 13,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Setup Progress
-                const Text(
-                  "Setup Progress",
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: Colors.blueAccent,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _buildProgressItem(true, "Health Connect Installed", isDark),
-                _buildProgressItem(true, "Connected Successfully", isDark),
-                _buildProgressItem(true, "Permissions Granted", isDark),
-                _buildProgressItem(false, "Fitness App Synced", isDark),
-                _buildProgressItem(false, "Health Data Available", isDark),
-
-                const SizedBox(height: 16),
-
-                // Actions
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blueAccent,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _showGuide = !_showGuide;
-                          });
-                        },
-                        child: Text(
-                          _showGuide
-                              ? "Hide Setup Guide"
-                              : "Setup Google Fit →",
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white.withOpacity(
-                          isDark ? 0.08 : 0.12,
-                        ),
-                        foregroundColor: textColor,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(
-                            color: isDark ? Colors.white24 : Colors.black12,
-                          ),
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 14,
-                          horizontal: 16,
-                        ),
-                        elevation: 0,
-                      ),
-                      onPressed: () {
-                        _syncData();
-                      },
-                      child: const Text("Refresh Dashboard"),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-
-        // 3. Google Fit Setup Guide (collapsible) - MOVED TO BOTTOM
-        if (_showGuide)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: GlassCard(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  child: Row(
                     children: [
-                      const Icon(Icons.help_outline, color: Colors.blueAccent),
-                      const SizedBox(width: 8),
-                      Text(
-                        "Google Fit Setup Guide",
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: textColor,
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: Colors.blueAccent.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Center(
+                          child: Icon(
+                            Icons.sync_rounded,
+                            color: Colors.blueAccent,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Google Fit Setup Guide",
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: textColor,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              "Tap to view step-by-step sync setup",
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isDark ? Colors.white30 : Colors.black45,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  _buildGuideStep("1", "Open Google Fit app on your device"),
-                  _buildGuideStep("2", "Go to your Profile tab"),
-                  _buildGuideStep("3", "Open Settings (Gear Icon)"),
-                  _buildGuideStep("4", "Enable Health Connect Sync option"),
-                  _buildGuideStep(
-                    "5",
-                    "Grant all Read & Write Permissions requested",
-                  ),
-                  _buildGuideStep(
-                    "6",
-                    "Walk for a few minutes or wait for the data to sync",
-                  ),
-                  _buildGuideStep(
-                    "7",
-                    "Return to this app and tap 'Refresh Dashboard' above",
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
-
-        // 4. User Confirmation Card - MOVED TO BOTTOM
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          child: GlassCard(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  "I've already completed the setup",
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: textColor,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  "If you have already completed the setup steps above but we still can't detect health data, you can continue using the dashboard.",
-                  style: TextStyle(
-                    color: secondaryTextColor,
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: theme.colorScheme.primary,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
+            Padding(
+              padding: const EdgeInsets.only(right: 14),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => _setDismissedSetupCard(true),
+                  borderRadius: BorderRadius.circular(10),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.white.withOpacity(0.04)
+                          : Colors.black.withOpacity(0.03),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isDark
+                            ? Colors.white.withOpacity(0.08)
+                            : Colors.black.withOpacity(0.05),
+                        width: 1.0,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(isDark ? 0.15 : 0.02),
+                          blurRadius: 4,
+                          spreadRadius: 1,
                         ),
-                        onPressed: () {
-                          _syncData();
-                        },
-                        child: const Text(
-                          "Verify Again",
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: Icon(
+                        Icons.close_rounded,
+                        size: 14,
+                        color: isDark ? Colors.white60 : Colors.black54,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: theme.colorScheme.secondary,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        onPressed: () {
-                          _setSetupCompleted(true);
-                        },
-                        child: const Text(
-                          "I've Completed the Setup",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -2416,6 +2316,12 @@ class DashboardScreenState extends State<DashboardScreen>
             icon: "💓",
             color: Colors.red,
             subtitle: "Realtime reading",
+            onTap: () => _navigateToMetricDetail(
+              'heart_rate',
+              'Heart Rate',
+              '💓',
+              Colors.red,
+            ),
           ),
           MetricCard(
             title: "Resting Heart",
@@ -2426,6 +2332,12 @@ class DashboardScreenState extends State<DashboardScreen>
             icon: "💤",
             color: Colors.indigo,
             subtitle: "Average pulse",
+            onTap: () => _navigateToMetricDetail(
+              'heart_rate',
+              'Heart Rate',
+              '💤',
+              Colors.indigo,
+            ),
           ),
           MetricCard(
             title: "Blood Pressure",
@@ -2499,6 +2411,12 @@ class DashboardScreenState extends State<DashboardScreen>
             color: Colors.purpleAccent,
             progress: _healthData.sleepDuration / _sleepGoal,
             subtitle: "Goal: ${_sleepGoal.round()} hrs",
+            onTap: () => _navigateToMetricDetail(
+              'sleep',
+              'Sleep',
+              '🌙',
+              Colors.purpleAccent,
+            ),
           ),
           MetricCard(
             title: "Sleep Quality",
@@ -2560,6 +2478,41 @@ class DashboardScreenState extends State<DashboardScreen>
         ),
       ),
     );
+  }
+
+  Future<void> _navigateToMetricDetail(
+    String metric,
+    String title,
+    String icon,
+    Color color,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonStr = prefs.getString('onboarding_data');
+    String email = "testuser@arcar.com";
+    if (jsonStr != null) {
+      final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
+      final storedEmail = onboarding['auth']?['email'];
+      if (storedEmail != null) {
+        email = storedEmail;
+      }
+    }
+
+    if (!mounted) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MetricDetailScreen(
+          metric: metric,
+          title: title,
+          icon: icon,
+          color: color,
+          email: email,
+        ),
+      ),
+    ).then((_) {
+      _fetchRealData(forceSync: false);
+    });
   }
 
   @override
@@ -2682,6 +2635,12 @@ class DashboardScreenState extends State<DashboardScreen>
                         icon: "👣",
                         color: const Color(0xFF2EE5A3),
                         subtitle: "Goal: ${_stepGoal.round()}",
+                        onTap: () => _navigateToMetricDetail(
+                          'steps',
+                          'Steps',
+                          '👣',
+                          const Color(0xFF2EE5A3),
+                        ),
                       ),
                       MetricCard(
                         title: "Heart Rate",
@@ -2694,6 +2653,12 @@ class DashboardScreenState extends State<DashboardScreen>
                         subtitle: _healthData.heartRate > 0
                             ? "bpm avg"
                             : "No readings",
+                        onTap: () => _navigateToMetricDetail(
+                          'heart_rate',
+                          'Heart Rate',
+                          '❤️',
+                          const Color(0xFFFF6D55),
+                        ),
                       ),
                       MetricCard(
                         title: "Calories",
@@ -2704,6 +2669,12 @@ class DashboardScreenState extends State<DashboardScreen>
                         icon: "🔥",
                         color: const Color(0xFFFFB03A),
                         subtitle: "Goal: ${_calorieGoal.round()} kcal",
+                        onTap: () => _navigateToMetricDetail(
+                          'calories',
+                          'Calories',
+                          '🔥',
+                          const Color(0xFFFFB03A),
+                        ),
                       ),
                       MetricCard(
                         title: "Sleep",
@@ -2714,6 +2685,12 @@ class DashboardScreenState extends State<DashboardScreen>
                         icon: "🌙",
                         color: const Color(0xFF8F6BFF),
                         subtitle: "Goal: ${_sleepGoal.round()} hrs",
+                        onTap: () => _navigateToMetricDetail(
+                          'sleep',
+                          'Sleep',
+                          '🌙',
+                          const Color(0xFF8F6BFF),
+                        ),
                       ),
                     ],
                   ),
@@ -3424,6 +3401,256 @@ class DashboardScreenState extends State<DashboardScreen>
               );
             },
             child: const Text("Revoke", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class GoogleFitSetupGuideScreen extends StatelessWidget {
+  final bool isDark;
+  final VoidCallback onRefresh;
+
+  const GoogleFitSetupGuideScreen({
+    super.key,
+    required this.isDark,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final secondaryTextColor = isDark ? Colors.grey[400] : Colors.grey[600];
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Container(
+              color: isDark ? const Color(0xFF0F0F12) : const Color(0xFFF6F8FC),
+            ),
+          ),
+          SafeArea(
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      IconButton(
+                        style: IconButton.styleFrom(
+                          backgroundColor: isDark
+                              ? Colors.white.withOpacity(0.06)
+                              : Colors.black.withOpacity(0.04),
+                        ),
+                        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
+                        color: isDark ? Colors.white70 : Colors.black87,
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Sync Guide",
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: -0.5,
+                              color: textColor,
+                            ),
+                          ),
+                          Text(
+                            "Setup Google Fit synchronization",
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: secondaryTextColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  GlassCard(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            const Text("🎉", style: TextStyle(fontSize: 28)),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                "Almost Synced!",
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: textColor,
+                                  fontSize: 17,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          "Health Connect is connected. To view health metrics, please ensure a supported fitness app (like Google Fit) is active and syncing with Health Connect.",
+                          style: TextStyle(
+                            color: secondaryTextColor,
+                            fontSize: 12.5,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  GlassCard(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "Connection Progress",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: Colors.blueAccent,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _buildProgressItem(true, "Health Connect Installed", isDark),
+                        _buildProgressItem(true, "Connected Successfully", isDark),
+                        _buildProgressItem(true, "Permissions Granted", isDark),
+                        _buildProgressItem(false, "Fitness App Synced", isDark),
+                        _buildProgressItem(false, "Health Data Available", isDark),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  GlassCard(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.help_outline, color: Colors.blueAccent),
+                            const SizedBox(width: 8),
+                            Text(
+                              "Google Fit Sync Steps",
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: textColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        _buildGuideStep("1", "Open Google Fit app on your device", isDark),
+                        _buildGuideStep("2", "Go to your Profile tab", isDark),
+                        _buildGuideStep("3", "Open Settings (Gear Icon)", isDark),
+                        _buildGuideStep("4", "Enable Health Connect Sync option", isDark),
+                        _buildGuideStep("5", "Grant all Read & Write Permissions requested", isDark),
+                        _buildGuideStep("6", "Walk for a few minutes or wait for the data to sync", isDark),
+                        _buildGuideStep("7", "Return to Arcare App and refresh", isDark),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      elevation: 0,
+                    ),
+                    onPressed: () {
+                      onRefresh();
+                      Navigator.pop(context);
+                    },
+                    child: const Text(
+                      "Sync & Refresh Dashboard",
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressItem(bool completed, String label, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        children: [
+          Icon(
+            completed ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+            color: completed ? const Color(0xFF00C781) : (isDark ? Colors.white24 : Colors.black26),
+            size: 18,
+          ),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              color: completed
+                  ? (isDark ? Colors.white.withOpacity(0.87) : Colors.black87)
+                  : (isDark ? Colors.white.withOpacity(0.3) : Colors.black38),
+              fontWeight: completed ? FontWeight.w600 : FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGuideStep(String step, String text, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: Colors.blueAccent.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                step,
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blueAccent,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 12.5,
+                color: isDark ? Colors.white70 : Colors.black87,
+                height: 1.4,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
         ],
       ),
