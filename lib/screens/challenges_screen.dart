@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 import '../widgets/glass_card.dart';
 import '../widgets/concentric_rings_chart.dart';
 import '../services/health_service.dart';
+import '../services/auth_service.dart';
 
 class LeaderboardPlayer {
   String name;
@@ -39,6 +41,9 @@ class Challenge {
   bool isJoined;
   List<LeaderboardPlayer> leaderboard;
   bool isExpanded;
+  final int participantsCount;
+  bool completed;
+  final String? infoText;
 
   Challenge({
     required this.id,
@@ -53,8 +58,61 @@ class Challenge {
     required this.metricType,
     required this.isJoined,
     required this.leaderboard,
+    required this.participantsCount,
+    required this.completed,
     this.isExpanded = false,
+    this.infoText,
   });
+
+  factory Challenge.fromJson(Map<String, dynamic> json) {
+    final category = json['category'] as String? ?? 'steps';
+    final target = (json['targetValue'] as num?)?.toDouble() ?? 1.0;
+    final unit = json['unit'] as String? ?? '';
+
+    Color cColor = Colors.blue;
+    if (category == 'water')
+      cColor = Colors.blueAccent;
+    else if (category == 'steps')
+      cColor = Colors.green;
+    else if (category == 'sleep')
+      cColor = Colors.purple;
+    else if (category == 'calories')
+      cColor = Colors.orange;
+
+    final endStr = json['endDate'] as String? ?? '';
+    String timeRemaining = "Active";
+    if (endStr.isNotEmpty) {
+      final end = DateTime.tryParse(endStr);
+      if (end != null) {
+        final diff = end.difference(DateTime.now());
+        timeRemaining = diff.inDays > 0
+            ? "${diff.inDays} days left"
+            : "Ends today";
+      }
+    }
+
+    return Challenge(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      desc:
+          json['shortDescription'] as String? ??
+          json['description'] as String? ??
+          '',
+      progress: (json['currentProgress'] as num?)?.toDouble() ?? 0.0,
+      target: target,
+      progressTextPattern: "Progress: %s/${target.round()} $unit",
+      points: json['rewardPoints'] as int? ?? 0,
+      timeLeft: timeRemaining,
+      color: cColor,
+      metricType: category,
+      isJoined: json['joined'] as bool? ?? false,
+      leaderboard: [],
+      participantsCount: json['participantsCount'] as int? ?? 0,
+      completed: json['completed'] as bool? ?? false,
+      isExpanded: false,
+      infoText: json['infoText'] as String?,
+    );
+  }
 }
 
 class ChallengesScreen extends StatefulWidget {
@@ -65,106 +123,37 @@ class ChallengesScreen extends StatefulWidget {
 }
 
 class _ChallengesScreenState extends State<ChallengesScreen> {
-  final int _userPoints = 350;
+  int _userPoints = 0;
   String _userName = "User";
   bool _isLoading = true;
+  String? _errorMessage;
   HealthData _healthData = HealthData();
-
-  late List<Challenge> _challenges;
+  List<Challenge> _challenges = [];
+  final Map<String, bool> _leaderboardLoading = {};
+  List<String> _claimedRewards = [];
 
   @override
   void initState() {
     super.initState();
-    _initChallenges();
     _loadData();
   }
 
-  void _initChallenges() {
-    _challenges = [
-      Challenge(
-        id: "hydration",
-        title: "Weekly Hydration Champion",
-        desc: "Log at least 2000 ml of water daily for 7 consecutive days.",
-        progress: 5.0,
-        target: 7.0,
-        progressTextPattern: "Progress: %s/7 days completed",
-        points: 150,
-        timeLeft: "3 days left",
-        color: Colors.blueAccent,
-        metricType: "water",
-        isJoined: true,
-        leaderboard: [
-          LeaderboardPlayer(name: "Alex Mercer", progress: 6.0, progressTextPattern: "%s days"),
-          LeaderboardPlayer(name: "Sarah Connor", progress: 6.0, progressTextPattern: "%s days"),
-          LeaderboardPlayer(name: "You", progress: 5.0, progressTextPattern: "%s days", isUser: true),
-          LeaderboardPlayer(name: "David Beckham", progress: 5.0, progressTextPattern: "%s days"),
-          LeaderboardPlayer(name: "Emma Watson", progress: 4.0, progressTextPattern: "%s days"),
-        ],
-      ),
-      Challenge(
-        id: "steps",
-        title: "10K Steps Master Routine",
-        desc: "Achieve a minimum of 10,000 steps daily for 5 days this week.",
-        progress: 3.0,
-        target: 5.0,
-        progressTextPattern: "Progress: %s/5 days completed",
-        points: 200,
-        timeLeft: "4 days left",
-        color: Colors.green,
-        metricType: "steps",
-        isJoined: true,
-        leaderboard: [
-          LeaderboardPlayer(name: "Usain Bolt", progress: 5.0, progressTextPattern: "%s days"),
-          LeaderboardPlayer(name: "Eliud Kipchoge", progress: 4.0, progressTextPattern: "%s days"),
-          LeaderboardPlayer(name: "You", progress: 3.0, progressTextPattern: "%s days", isUser: true),
-          LeaderboardPlayer(name: "Serena Williams", progress: 3.0, progressTextPattern: "%s days"),
-          LeaderboardPlayer(name: "LeBron James", progress: 2.0, progressTextPattern: "%s days"),
-        ],
-      ),
-      Challenge(
-        id: "sleep",
-        title: "Consistent Sleep Schedule",
-        desc: "Maintain 7.5+ hours of sleep duration daily for 5 consecutive nights.",
-        progress: 0.0,
-        target: 5.0,
-        progressTextPattern: "Progress: %s/5 nights completed",
-        points: 180,
-        timeLeft: "5-Day Duration",
-        color: Colors.purple,
-        metricType: "sleep",
-        isJoined: false,
-        leaderboard: [
-          LeaderboardPlayer(name: "Sleeping Beauty", progress: 4.0, progressTextPattern: "%s nights"),
-          LeaderboardPlayer(name: "Arianna Huffington", progress: 3.0, progressTextPattern: "%s nights"),
-          LeaderboardPlayer(name: "You", progress: 0.0, progressTextPattern: "%s nights", isUser: true),
-          LeaderboardPlayer(name: "Elon Musk", progress: 1.0, progressTextPattern: "%s nights"),
-          LeaderboardPlayer(name: "Bill Gates", progress: 1.0, progressTextPattern: "%s nights"),
-        ],
-      ),
-      Challenge(
-        id: "calories",
-        title: "Calorie Burn Streak",
-        desc: "Burn at least 500 active calories daily through logged exercises for 3 days.",
-        progress: 0.0,
-        target: 3.0,
-        progressTextPattern: "Progress: %s/3 days completed",
-        points: 120,
-        timeLeft: "3-Day Duration",
-        color: Colors.orange,
-        metricType: "calories",
-        isJoined: false,
-        leaderboard: [
-          LeaderboardPlayer(name: "Arnold Schwarzenegger", progress: 3.0, progressTextPattern: "%s days"),
-          LeaderboardPlayer(name: "Michael Phelps", progress: 2.0, progressTextPattern: "%s days"),
-          LeaderboardPlayer(name: "You", progress: 0.0, progressTextPattern: "%s days", isUser: true),
-          LeaderboardPlayer(name: "Chris Hemsworth", progress: 1.0, progressTextPattern: "%s days"),
-          LeaderboardPlayer(name: "Dwayne Johnson", progress: 1.0, progressTextPattern: "%s days"),
-        ],
-      ),
-    ];
+  void _updateUserPoints() {
+    int total = 0;
+    for (var c in _challenges) {
+      if (_claimedRewards.contains(c.id)) {
+        total += c.points;
+      }
+    }
+    setState(() {
+      _userPoints = total;
+    });
   }
 
-  Future<void> _loadData() async {
+  Future<void> _loadData({
+    bool showLoadingIndicator = true,
+    bool forceRefresh = false,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     String name = "User";
     final localName = prefs.getString('user_name');
@@ -185,9 +174,13 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
       }
     }
 
+    final claimed = prefs.getStringList('claimed_challenge_rewards') ?? [];
+
     HealthData healthData = HealthData();
     try {
-      healthData = await HealthService.instance.fetchHealthData();
+      healthData = await HealthService.instance.fetchHealthData(
+        forceRefresh: forceRefresh,
+      );
     } catch (e) {
       debugPrint("Error fetching health data: $e");
     }
@@ -196,38 +189,450 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
       setState(() {
         _userName = name;
         _healthData = healthData;
+        _claimedRewards = claimed;
+      });
+      await _fetchChallenges(
+        showLoadingIndicator: showLoadingIndicator,
+        forceRefresh: forceRefresh,
+      );
+    }
+  }
+
+  Future<void> _waitForHomeSync() async {
+    if (HealthService.instance.homeSyncFuture != null) {
+      debugPrint(
+        "Merged Home Sync is in progress. Waiting for completion before calling other APIs...",
+      );
+      await HealthService.instance.homeSyncFuture;
+      debugPrint("Merged Home Sync completed. Resuming API request flow.");
+    }
+  }
+
+  Future<void> _fetchChallenges({
+    bool preventSync = false,
+    bool showLoadingIndicator = true,
+    bool forceRefresh = false,
+  }) async {
+    await _waitForHomeSync();
+    if (showLoadingIndicator) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
+
+    try {
+      final token = await AuthService.instance.getAccessToken();
+      final url = '${AuthService.apiBaseUrl}/api/challenges';
+
+      debugPrint(
+        "================ GET CHALLENGES API REQUEST ================",
+      );
+      debugPrint("URL: $url");
+      debugPrint("Method: GET");
+      debugPrint(
+        "Headers: ${token != null ? 'Authorization: Bearer [$token]' : 'None'}",
+      );
+      debugPrint(
+        "============================================================",
+      );
+
+      var response = await http.get(
+        Uri.parse(url),
+        headers: {if (token != null) 'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 401) {
+        await AuthService.instance.refreshSessionToken();
+        final newToken = await AuthService.instance.getAccessToken();
+        response = await http.get(
+          Uri.parse(url),
+          headers: {if (newToken != null) 'Authorization': 'Bearer $newToken'},
+        );
+      }
+
+      debugPrint(
+        "================ GET CHALLENGES API RESPONSE ================",
+      );
+      debugPrint("Status Code: ${response.statusCode}");
+      debugPrint("Response Body: ${response.body}");
+      debugPrint(
+        "=============================================================",
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> list = jsonDecode(response.body);
+        final fetched = list.map((json) => Challenge.fromJson(json)).toList();
+        setState(() {
+          _challenges = fetched;
+        });
+        _updateUserPoints();
+        if (!preventSync) {
+          await _calculateAndSyncProgress(forceRefresh: forceRefresh);
+        }
+      } else {
+        setState(() {
+          _errorMessage =
+              "Failed to load challenges from server (${response.statusCode})";
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading challenges: $e");
+      setState(() {
+        _errorMessage = "Failed to connect to server: $e";
+      });
+    } finally {
+      if (showLoadingIndicator) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _calculateAndSyncProgress({bool forceRefresh = false}) async {
+    await _waitForHomeSync();
+    final dailyRecords = await HealthService.instance
+        .fetchDailyHealthDataForPeriod(days: 7, forceRefresh: forceRefresh);
+
+    bool didSyncAny = false;
+    for (var challenge in _challenges) {
+      if (!challenge.isJoined) continue;
+
+      double calculatedProgress = 0.0;
+
+      if (challenge.metricType == 'water') {
+        calculatedProgress = dailyRecords
+            .where((r) {
+              final waterVal = ((r['water_intake_ml'] ?? 0) as num).toDouble();
+              return waterVal >= 2000.0;
+            })
+            .length
+            .toDouble();
+      } else if (challenge.metricType == 'steps') {
+        calculatedProgress = dailyRecords
+            .where((r) {
+              final stepsVal = ((r['steps'] ?? 0) as num).toDouble();
+              return stepsVal >= 10000.0;
+            })
+            .length
+            .toDouble();
+      } else if (challenge.metricType == 'sleep') {
+        calculatedProgress = dailyRecords
+            .where((r) {
+              final sleepVal = ((r['sleep_duration_hours'] ?? 0.0) as num)
+                  .toDouble();
+              return sleepVal >= 7.5;
+            })
+            .length
+            .toDouble();
+      } else if (challenge.metricType == 'calories') {
+        calculatedProgress = dailyRecords
+            .where((r) {
+              final calVal = ((r['calories'] ?? 0) as num).toDouble();
+              return calVal >= 500.0;
+            })
+            .length
+            .toDouble();
+      }
+
+      if (calculatedProgress > challenge.target) {
+        calculatedProgress = challenge.target;
+      }
+
+      setState(() {
+        challenge.progress = calculatedProgress;
+      });
+
+      try {
+        final token = await AuthService.instance.getAccessToken();
+        final syncUrl =
+            '${AuthService.apiBaseUrl}/api/challenges/${challenge.id}/progress';
+
+        debugPrint(
+          "================ UPDATE PROGRESS API REQUEST ================",
+        );
+        debugPrint("URL: $syncUrl");
+        debugPrint("Method: POST");
+        debugPrint(
+          "Headers: ${token != null ? 'Authorization: Bearer [token]' : 'None'}",
+        );
+        debugPrint("Body: {'progress': $calculatedProgress}");
+        debugPrint(
+          "=============================================================",
+        );
+
+        final response = await http.post(
+          Uri.parse(syncUrl),
+          headers: {
+            'Content-Type': 'application/json',
+            if (token != null) 'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode({'progress': calculatedProgress}),
+        );
+
+        debugPrint(
+          "================ UPDATE PROGRESS API RESPONSE ================",
+        );
+        debugPrint("Challenge: ${challenge.title}");
+        debugPrint("Status Code: ${response.statusCode}");
+        debugPrint("Response Body: ${response.body}");
+        debugPrint(
+          "=============================================================",
+        );
+
+        if (response.statusCode == 200) {
+          didSyncAny = true;
+        }
+      } catch (e) {
+        debugPrint("Failed to sync progress for ${challenge.title}: $e");
+      }
+    }
+
+    if (didSyncAny) {
+      // Re-fetch challenges to update state from server (completed flags, rank, participantsCount, etc.)
+      await _fetchChallenges(preventSync: true, showLoadingIndicator: false);
+    }
+  }
+
+  Future<void> _joinChallenge(Challenge challenge) async {
+    await _waitForHomeSync();
+    setState(() {
+      _isLoading = true;
+    });
+    try {
+      final token = await AuthService.instance.getAccessToken();
+      final url =
+          '${AuthService.apiBaseUrl}/api/challenges/${challenge.id}/join';
+
+      debugPrint(
+        "================ JOIN CHALLENGE API REQUEST ================",
+      );
+      debugPrint("URL: $url");
+      debugPrint("Method: POST");
+      debugPrint(
+        "Headers: ${token != null ? 'Authorization: Bearer [token]' : 'None'}",
+      );
+      debugPrint(
+        "============================================================",
+      );
+
+      var response = await http.post(
+        Uri.parse(url),
+        headers: {if (token != null) 'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 401) {
+        await AuthService.instance.refreshSessionToken();
+        final newToken = await AuthService.instance.getAccessToken();
+        response = await http.post(
+          Uri.parse(url),
+          headers: {if (newToken != null) 'Authorization': 'Bearer $newToken'},
+        );
+      }
+
+      debugPrint(
+        "================ JOIN CHALLENGE API RESPONSE ================",
+      );
+      debugPrint("Status Code: ${response.statusCode}");
+      debugPrint("Response Body: ${response.body}");
+      debugPrint(
+        "=============================================================",
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        setState(() {
+          challenge.isJoined = true;
+        });
+        await _calculateAndSyncProgress();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Joined ${challenge.title} challenge!"),
+            backgroundColor: challenge.color,
+          ),
+        );
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Failed to join challenge: ${response.statusCode}"),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error joining challenge: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Network error: $e"),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } finally {
+      setState(() {
         _isLoading = false;
-        _updateChallengeProgressWithRealData();
       });
     }
   }
 
-  void _updateChallengeProgressWithRealData() {
-    for (var c in _challenges) {
-      if (c.id == 'hydration') {
-        final isWaterGoalMetToday = _healthData.waterIntake >= 2000.0;
-        c.progress = isWaterGoalMetToday ? 6.0 : 5.0;
-      } else if (c.id == 'steps') {
-        final isStepGoalMetToday = _healthData.steps >= 10000.0;
-        c.progress = isStepGoalMetToday ? 4.0 : 3.0;
-      } else if (c.id == 'sleep' && c.isJoined) {
-        final isSleepGoalMetToday = _healthData.sleepDuration >= 7.5;
-        c.progress = isSleepGoalMetToday ? 1.0 : 0.0;
-      } else if (c.id == 'calories' && c.isJoined) {
-        final isCalorieGoalMetToday = _healthData.activeCalories >= 500.0;
-        c.progress = isCalorieGoalMetToday ? 1.0 : 0.0;
+  Future<void> _fetchLeaderboard(Challenge challenge) async {
+    await _waitForHomeSync();
+    setState(() {
+      _leaderboardLoading[challenge.id] = true;
+    });
+    try {
+      final token = await AuthService.instance.getAccessToken();
+      final url =
+          '${AuthService.apiBaseUrl}/api/challenges/${challenge.id}/leaderboard?page=1&limit=10&leaderboardType=GLOBAL';
+
+      debugPrint(
+        "================ GET LEADERBOARD API REQUEST ================",
+      );
+      debugPrint("URL: $url");
+      debugPrint("Method: GET");
+      debugPrint(
+        "Headers: ${token != null ? 'Authorization: Bearer [token]' : 'None'}",
+      );
+      debugPrint(
+        "=============================================================",
+      );
+
+      var response = await http.get(
+        Uri.parse(url),
+        headers: {if (token != null) 'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 401) {
+        await AuthService.instance.refreshSessionToken();
+        final newToken = await AuthService.instance.getAccessToken();
+        response = await http.get(
+          Uri.parse(url),
+          headers: {if (newToken != null) 'Authorization': 'Bearer $newToken'},
+        );
       }
 
-      // Update the "You" player in leaderboard
-      for (var player in c.leaderboard) {
-        if (player.isUser) {
-          player.name = "$_userName (You)";
-          player.progress = c.progress;
-        }
+      debugPrint(
+        "================ GET LEADERBOARD API RESPONSE ================",
+      );
+      debugPrint("Status Code: ${response.statusCode}");
+      debugPrint("Response Body: ${response.body}");
+      debugPrint(
+        "=============================================================",
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final List<dynamic> leadersJson = data['leaders'] ?? [];
+
+        final List<LeaderboardPlayer> players = leadersJson.map((l) {
+          final name = l['name'] as String? ?? 'User';
+          final progress = (l['progress'] as num?)?.toDouble() ?? 0.0;
+          return LeaderboardPlayer(
+            name: name == _userName ? "$name (You)" : name,
+            progress: progress,
+            progressTextPattern:
+                "%s ${challenge.progressTextPattern.split(' ').last}",
+            isUser: name == _userName,
+          );
+        }).toList();
+
+        players.sort((a, b) => b.progress.compareTo(a.progress));
+
+        setState(() {
+          challenge.leaderboard = players;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching leaderboard: $e");
+    } finally {
+      setState(() {
+        _leaderboardLoading[challenge.id] = false;
+      });
+    }
+  }
+
+  Future<void> _claimReward(Challenge challenge) async {
+    await _waitForHomeSync();
+    setState(() {
+      _isLoading = true;
+    });
+    try {
+      final token = await AuthService.instance.getAccessToken();
+      final url =
+          '${AuthService.apiBaseUrl}/api/challenges/${challenge.id}/claim-reward';
+
+      debugPrint("================ CLAIM REWARD API REQUEST ================");
+      debugPrint("URL: $url");
+      debugPrint("Method: POST");
+      debugPrint(
+        "Headers: ${token != null ? 'Authorization: Bearer [token]' : 'None'}",
+      );
+      debugPrint("==========================================================");
+
+      var response = await http.post(
+        Uri.parse(url),
+        headers: {if (token != null) 'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 401) {
+        await AuthService.instance.refreshSessionToken();
+        final newToken = await AuthService.instance.getAccessToken();
+        response = await http.post(
+          Uri.parse(url),
+          headers: {if (newToken != null) 'Authorization': 'Bearer $newToken'},
+        );
       }
 
-      // Sort leaderboard: descending by progress
-      c.leaderboard.sort((a, b) => b.progress.compareTo(a.progress));
+      debugPrint("================ CLAIM REWARD API RESPONSE ================");
+      debugPrint("Status Code: ${response.statusCode}");
+      debugPrint("Response Body: ${response.body}");
+      debugPrint("===========================================================");
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final int rewardPoints = data['rewardPoints'] ?? challenge.points;
+
+        final prefs = await SharedPreferences.getInstance();
+        setState(() {
+          _claimedRewards.add(challenge.id);
+        });
+
+        await prefs.setStringList('claimed_challenge_rewards', _claimedRewards);
+        _updateUserPoints();
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "🎉 Claimed $rewardPoints points for completing ${challenge.title}!",
+            ),
+            backgroundColor: Colors.amber,
+          ),
+        );
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Failed to claim reward: ${response.statusCode}"),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error claiming reward: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Network error: $e"),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
@@ -237,6 +642,45 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
     final isDark = theme.brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : Colors.black87;
     final secondaryTextColor = isDark ? Colors.grey[400] : Colors.grey[600];
+
+    if (_errorMessage != null) {
+      return Scaffold(
+        body: Container(
+          color: isDark ? const Color(0xFF0F0F12) : const Color(0xFFF6F8FC),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text("⚠️", style: TextStyle(fontSize: 48)),
+                  const SizedBox(height: 16),
+                  Text(
+                    _errorMessage!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _loadData,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text("Retry"),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     if (_isLoading) {
       return Scaffold(
@@ -277,124 +721,41 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
           ),
 
           SafeArea(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Title Area
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            "Challenges 🏆",
-                            style: theme.textTheme.headlineMedium?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              color: textColor,
-                            ),
-                          ),
-                          Text(
-                            "Push your limits & earn rewards",
-                            style: TextStyle(
-                              color: secondaryTextColor,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                      // Points Container
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: Colors.amber.withValues(alpha: 0.4),
-                          ),
-                        ),
-                        child: Row(
+            child: RefreshIndicator(
+              color: Colors.blueAccent,
+              onRefresh: () async {
+                await _loadData(
+                  showLoadingIndicator: false,
+                  forceRefresh: true,
+                );
+              },
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 16,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Title Area
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text("🪙 ", style: TextStyle(fontSize: 14)),
                             Text(
-                              "$_userPoints Pts",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.amber,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Progress Rings Chart
-                  _buildProgressCard(isDark),
-                  const SizedBox(height: 24),
-
-                  // Active Challenges Section Header
-                  Text(
-                    "Active Challenges",
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                      color: textColor,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Active challenges list
-                  ..._challenges
-                      .where((c) => c.isJoined)
-                      .map((c) => Column(
-                            children: [
-                              _buildChallengeCard(c, isDark),
-                              const SizedBox(height: 14),
-                            ],
-                          )),
-
-                  const SizedBox(height: 12),
-
-                  // Explore Section Header
-                  Text(
-                    "Explore New Challenges",
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                      color: textColor,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Explore/Upcoming challenges list
-                  if (_challenges.where((c) => !c.isJoined).isEmpty)
-                    GlassCard(
-                      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-                      child: Center(
-                        child: Column(
-                          children: [
-                            const Text(
-                              "🎉",
-                              style: TextStyle(fontSize: 32),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              "You have joined all challenges!",
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
+                              "Challenges 🏆",
+                              style: theme.textTheme.headlineMedium?.copyWith(
+                                fontWeight: FontWeight.w900,
                                 color: textColor,
-                                fontSize: 14,
                               ),
                             ),
-                            const SizedBox(height: 4),
                             Text(
-                              "Stay tuned for new weekly events.",
+                              "Push your limits & earn rewards",
                               style: TextStyle(
                                 color: secondaryTextColor,
                                 fontSize: 12,
@@ -402,20 +763,163 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                             ),
                           ],
                         ),
+                        // Points Container
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.amber.withValues(alpha: 0.4),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Text("🪙 ", style: TextStyle(fontSize: 14)),
+                              Text(
+                                "$_userPoints Pts",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.amber,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+
+                    // Progress Rings Chart
+                    _buildProgressCard(isDark),
+                    const SizedBox(height: 24),
+
+                    // Active Challenges Section Header
+                    Text(
+                      "Active Challenges",
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        color: textColor,
                       ),
-                    )
-                  else
-                    ..._challenges
-                        .where((c) => !c.isJoined)
-                        .map((c) => Column(
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Active challenges list
+                    if (_challenges.where((c) => c.isJoined).isEmpty)
+                      GlassCard(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 32,
+                          horizontal: 16,
+                        ),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              const Text(
+                                "🧗‍♂️",
+                                style: TextStyle(fontSize: 36),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                "No Active Challenges",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: textColor,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                "Join a challenge below to start tracking your progress & earning rewards!",
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: secondaryTextColor,
+                                  fontSize: 12,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      ..._challenges
+                          .where((c) => c.isJoined)
+                          .map(
+                            (c) => Column(
+                              children: [
+                                _buildChallengeCard(c, isDark),
+                                const SizedBox(height: 14),
+                              ],
+                            ),
+                          ),
+
+                    const SizedBox(height: 12),
+
+                    // Explore Section Header
+                    Text(
+                      "Explore New Challenges",
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        color: textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Explore/Upcoming challenges list
+                    if (_challenges.where((c) => !c.isJoined).isEmpty)
+                      GlassCard(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 24,
+                          horizontal: 16,
+                        ),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              const Text("🎉", style: TextStyle(fontSize: 32)),
+                              const SizedBox(height: 8),
+                              Text(
+                                "You have joined all challenges!",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: textColor,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                "Stay tuned for new weekly events.",
+                                style: TextStyle(
+                                  color: secondaryTextColor,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      ..._challenges
+                          .where((c) => !c.isJoined)
+                          .map(
+                            (c) => Column(
                               children: [
                                 _buildUpcomingChallengeCard(c, isDark),
                                 const SizedBox(height: 14),
                               ],
-                            )),
+                            ),
+                          ),
 
-                  const SizedBox(height: 80), // Padding to clear bottom navigation bar
-                ],
+                    const SizedBox(
+                      height: 80,
+                    ), // Padding to clear bottom navigation bar
+                  ],
+                ),
               ),
             ),
           ),
@@ -426,13 +930,21 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
 
   Widget _buildProgressCard(bool isDark) {
     final activeChallenges = _challenges.where((c) => c.isJoined).toList();
-    final ringsData = activeChallenges.map((c) {
-      return ConcentricRingData(
-        value: (c.progress / c.target).clamp(0.0, 1.0),
-        color: c.color,
-        label: c.title,
-      );
-    }).toList();
+    final ringsData = activeChallenges.isEmpty
+        ? [
+            ConcentricRingData(
+              value: 0.0,
+              color: Colors.grey.withValues(alpha: 0.2),
+              label: "No active challenges",
+            ),
+          ]
+        : activeChallenges.map((c) {
+            return ConcentricRingData(
+              value: (c.progress / c.target).clamp(0.0, 1.0),
+              color: c.color,
+              label: c.title,
+            );
+          }).toList();
 
     return GlassCard(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
@@ -451,7 +963,10 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.blueAccent.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(16),
@@ -499,7 +1014,8 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                   child: ConcentricRingsChart(rings: ringsData),
                 ),
                 Positioned(
-                  left: 82, // Positioned inside the bottom-right gap (x > 70, y > 70)
+                  left:
+                      82, // Positioned inside the bottom-right gap (x > 70, y > 70)
                   top: 76,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -576,10 +1092,7 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
         Container(
           width: 8,
           height: 8,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 6),
         Text(
@@ -600,12 +1113,15 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
     final color = challenge.color;
 
     final progressVal = (challenge.progress / challenge.target).clamp(0.0, 1.0);
-    final formattedProgressText = challenge.progressTextPattern
-        .replaceAll('%s', challenge.progress.round().toString());
+    final formattedProgressText = challenge.progressTextPattern.replaceAll(
+      '%s',
+      challenge.progress.round().toString(),
+    );
 
     // Calculate user rank
     final userRankIndex = challenge.leaderboard.indexWhere((p) => p.isUser);
     final userRank = userRankIndex != -1 ? userRankIndex + 1 : 1;
+    final isClaimed = _claimedRewards.contains(challenge.id);
 
     return GlassCard(
       padding: const EdgeInsets.all(20),
@@ -659,7 +1175,9 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                 children: [
                   const Text("🏆 ", style: TextStyle(fontSize: 12)),
                   Text(
-                    "Rank #$userRank of ${challenge.leaderboard.length}",
+                    challenge.leaderboard.isNotEmpty
+                        ? "Rank #$userRank of ${challenge.participantsCount}"
+                        : "${challenge.participantsCount} participants",
                     style: TextStyle(
                       color: color,
                       fontWeight: FontWeight.bold,
@@ -689,7 +1207,9 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
             child: LinearProgressIndicator(
               value: progressVal,
               minHeight: 6,
-              backgroundColor: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+              backgroundColor: isDark
+                  ? Colors.white10
+                  : Colors.black.withValues(alpha: 0.05),
               color: color,
             ),
           ),
@@ -699,10 +1219,7 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
             children: [
               Text(
                 formattedProgressText,
-                style: TextStyle(
-                  color: secondaryTextColor,
-                  fontSize: 11,
-                ),
+                style: TextStyle(color: secondaryTextColor, fontSize: 11),
               ),
               Text(
                 "${(progressVal * 100).round()}%",
@@ -718,11 +1235,39 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
           const Divider(height: 1, thickness: 0.5),
           const SizedBox(height: 8),
           // View Leaderboard Button
+          if (challenge.progress >= challenge.target) ...[
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isClaimed
+                    ? Colors.green.withValues(alpha: 0.15)
+                    : Colors.amber,
+                foregroundColor: isClaimed ? Colors.green : Colors.black87,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: isClaimed ? null : () => _claimReward(challenge),
+              icon: Icon(
+                isClaimed ? Icons.check_circle_outline : Icons.card_giftcard,
+              ),
+              label: Text(
+                isClaimed
+                    ? "Reward Claimed"
+                    : "Claim Reward (${challenge.points} Pts) 🎉",
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           InkWell(
             onTap: () {
               setState(() {
                 challenge.isExpanded = !challenge.isExpanded;
               });
+              if (challenge.isExpanded && challenge.leaderboard.isEmpty) {
+                _fetchLeaderboard(challenge);
+              }
             },
             borderRadius: BorderRadius.circular(8),
             child: Padding(
@@ -739,7 +1284,9 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    challenge.isExpanded ? "Hide Leaderboard" : "View Leaderboard",
+                    challenge.isExpanded
+                        ? "Hide Leaderboard"
+                        : "View Leaderboard",
                     style: TextStyle(
                       color: color,
                       fontSize: 12,
@@ -761,89 +1308,127 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: challenge.leaderboard.length,
-              itemBuilder: (context, index) {
-                final player = challenge.leaderboard[index];
-                final isCurrentUser = player.isUser;
-                
-                Widget rankWidget;
-                if (index == 0) {
-                  rankWidget = const Text("🥇", style: TextStyle(fontSize: 14));
-                } else if (index == 1) {
-                  rankWidget = const Text("🥈", style: TextStyle(fontSize: 14));
-                } else if (index == 2) {
-                  rankWidget = const Text("🥉", style: TextStyle(fontSize: 14));
-                } else {
-                  rankWidget = Text(
-                    "#${index + 1}",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: secondaryTextColor,
-                      fontSize: 12,
-                    ),
-                  );
-                }
-
-                return Container(
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: isCurrentUser
-                        ? color.withValues(alpha: 0.12)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(10),
-                    border: isCurrentUser
-                        ? Border.all(color: color.withValues(alpha: 0.3), width: 1)
-                        : null,
+            if (_leaderboardLoading[challenge.id] ?? false)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20),
+                  child: CircularProgressIndicator(color: Colors.blueAccent),
+                ),
+              )
+            else if (challenge.leaderboard.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Center(
+                  child: Text(
+                    "No competition data available yet.",
+                    style: TextStyle(color: secondaryTextColor, fontSize: 11),
                   ),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 24,
-                        child: Center(child: rankWidget),
+                ),
+              )
+            else
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: challenge.leaderboard.length,
+                itemBuilder: (context, index) {
+                  final player = challenge.leaderboard[index];
+                  final isCurrentUser = player.isUser;
+
+                  Widget rankWidget;
+                  if (index == 0) {
+                    rankWidget = const Text(
+                      "🥇",
+                      style: TextStyle(fontSize: 14),
+                    );
+                  } else if (index == 1) {
+                    rankWidget = const Text(
+                      "🥈",
+                      style: TextStyle(fontSize: 14),
+                    );
+                  } else if (index == 2) {
+                    rankWidget = const Text(
+                      "🥉",
+                      style: TextStyle(fontSize: 14),
+                    );
+                  } else {
+                    rankWidget = Text(
+                      "#${index + 1}",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: secondaryTextColor,
+                        fontSize: 12,
                       ),
-                      const SizedBox(width: 8),
-                      CircleAvatar(
-                        radius: 12,
-                        backgroundColor: isCurrentUser
-                            ? color.withValues(alpha: 0.2)
-                            : Colors.grey.withValues(alpha: 0.2),
-                        child: Text(
-                          player.name.isNotEmpty ? player.name[0].toUpperCase() : "?",
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: isCurrentUser ? color : textColor,
+                    );
+                  }
+
+                  return Container(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isCurrentUser
+                          ? color.withValues(alpha: 0.12)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      border: isCurrentUser
+                          ? Border.all(
+                              color: color.withValues(alpha: 0.3),
+                              width: 1,
+                            )
+                          : null,
+                    ),
+                    child: Row(
+                      children: [
+                        SizedBox(width: 24, child: Center(child: rankWidget)),
+                        const SizedBox(width: 8),
+                        CircleAvatar(
+                          radius: 12,
+                          backgroundColor: isCurrentUser
+                              ? color.withValues(alpha: 0.2)
+                              : Colors.grey.withValues(alpha: 0.2),
+                          child: Text(
+                            player.name.isNotEmpty
+                                ? player.name[0].toUpperCase()
+                                : "?",
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: isCurrentUser ? color : textColor,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          player.name,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            player.name,
+                            style: TextStyle(
+                              fontWeight: isCurrentUser
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                              color: isCurrentUser
+                                  ? textColor
+                                  : textColor.withValues(alpha: 0.9),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          player.progressText,
                           style: TextStyle(
-                            fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
-                            color: isCurrentUser ? textColor : textColor.withValues(alpha: 0.9),
+                            fontWeight: isCurrentUser
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: isCurrentUser ? color : secondaryTextColor,
                             fontSize: 12,
                           ),
                         ),
-                      ),
-                      Text(
-                        player.progressText,
-                        style: TextStyle(
-                          fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
-                          color: isCurrentUser ? color : secondaryTextColor,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+                      ],
+                    ),
+                  );
+                },
+              ),
           ],
         ],
       ),
@@ -864,13 +1449,35 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Expanded(
-                child: Text(
-                  challenge.title,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                    color: textColor,
-                  ),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        challenge.title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: textColor,
+                        ),
+                      ),
+                    ),
+                    if (challenge.infoText != null &&
+                        challenge.infoText!.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            challenge.isExpanded = !challenge.isExpanded;
+                          });
+                        },
+                        child: Icon(
+                          Icons.info_outline_rounded,
+                          size: 16,
+                          color: color,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               Text(
@@ -892,6 +1499,39 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
               height: 1.4,
             ),
           ),
+          if (challenge.isExpanded &&
+              challenge.infoText != null &&
+              challenge.infoText!.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: color.withValues(alpha: 0.2),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.lightbulb_outline_rounded, size: 16, color: color),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      challenge.infoText!,
+                      style: TextStyle(
+                        color: textColor.withValues(alpha: 0.9),
+                        fontSize: 11.5,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -916,23 +1556,15 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   elevation: 0,
                 ),
-                onPressed: () {
-                  setState(() {
-                    challenge.isJoined = true;
-                    _updateChallengeProgressWithRealData();
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text("Joined ${challenge.title} challenge!"),
-                      backgroundColor: color,
-                    ),
-                  );
-                },
+                onPressed: () => _joinChallenge(challenge),
                 child: const Text(
                   "Join Challenge",
                   style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),

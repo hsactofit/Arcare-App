@@ -60,11 +60,13 @@ class DashboardScreenState extends State<DashboardScreen>
   int? _sleepSubscore;
   int? _nutritionSubscore;
   int? _mindfulnessSubscore;
+  Future<List<Map<String, dynamic>>>? _dailyRecordsFuture;
 
   @override
   void initState() {
     super.initState();
     _loadSetupState();
+    _dailyRecordsFuture = HealthService.instance.fetchDailyHealthDataForPeriod(days: 7);
     _checkStatusAndSync();
 
     _waterWaveController = AnimationController(
@@ -391,7 +393,10 @@ class DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _fetchRealData({bool forceSync = false}) async {
-    setState(() => _isSyncing = true);
+    setState(() {
+      _isSyncing = true;
+      _dailyRecordsFuture = HealthService.instance.fetchDailyHealthDataForPeriod(days: 7, forceRefresh: forceSync);
+    });
     try {
       // 1. Always load the active local Health Connect data to update the UI cards
       final data = await HealthService.instance.fetchHealthData();
@@ -452,8 +457,7 @@ class DashboardScreenState extends State<DashboardScreen>
           final email = onboarding['auth']?['email'];
           if (email != null) {
             // Fetch daily health data for the last 7 days to sync to backend day-wise
-            final syncData = await HealthService.instance
-                .fetchDailyHealthDataForPeriod(days: 7);
+            final syncData = await _dailyRecordsFuture!;
             await _syncAndRefreshDashboard(email, syncData);
 
             // Re-load local health data so waterIntake from initializeWaterIntakeFromApi is mapped
@@ -479,97 +483,106 @@ class DashboardScreenState extends State<DashboardScreen>
     String email,
     List<Map<String, dynamic>> dailyRecords,
   ) async {
-    try {
-      final token = await AuthService.instance.getAccessToken();
-      final prefs = await SharedPreferences.getInstance();
+    final future = () async {
+      try {
+        final token = await AuthService.instance.getAccessToken();
+        final prefs = await SharedPreferences.getInstance();
 
-      // Combined Endpoint: Sync Health and retrieve complete dashboard metrics
-      final syncUrl =
-          '${AuthService.apiBaseUrl}/api/dashboard/sync/${Uri.encodeComponent(email)}';
-      final syncPayload = dailyRecords;
+        // Combined Endpoint: Sync Health and retrieve complete dashboard metrics
+        final syncUrl =
+            '${AuthService.apiBaseUrl}/api/dashboard/sync/${Uri.encodeComponent(email)}';
+        final syncPayload = dailyRecords;
 
-      // Debug log the full JSON payload
-      debugPrint(
-        "================ MERGED HOME SYNC JSON PAYLOAD (LAST 7 DAYS DAILY) ================",
-      );
-      debugPrint(const JsonEncoder.withIndent('  ').convert(syncPayload));
-      debugPrint(
-        "===================================================================================",
-      );
-
-      final response = await http.post(
-        Uri.parse(syncUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(syncPayload),
-      );
-
-      // Debug log the full JSON response
-      debugPrint(
-        "================ MERGED HOME SYNC API RESPONSE ================",
-      );
-      debugPrint("Status Code: ${response.statusCode}");
-      debugPrint("Response Body: ${response.body}");
-      debugPrint(
-        "=================================================================",
-      );
-
-      if (response.statusCode == 200) {
-        final resData = jsonDecode(response.body);
-        final int score = resData['wellness_score'] ?? 75;
-        final String summary = resData['daily_summary'] ?? "";
-        final List<String> recs = List<String>.from(
-          resData['recommendations'] ?? [],
-        );
-        final String buddyMsg =
-            resData['ai_buddy_message'] ?? "Hi! I am your AI Buddy.";
-        final int activeSub = resData['active_subscore'] ?? 0;
-        final int sleepSub = resData['sleep_subscore'] ?? 0;
-        final int nutriSub = resData['nutrition_subscore'] ?? 0;
-        final int mindSub = resData['mindfulness_subscore'] ?? 0;
-        final int apiWaterToday = resData['water_intake_today'] ?? 0;
-
-        await HealthService.instance.initializeWaterIntakeFromApi(
-          apiWaterToday.toDouble(),
-        );
-
-        setState(() {
-          _serverWellnessScore = score;
-          _serverDailySummary = summary;
-          _serverRecommendations = recs;
-          _activeSubscore = activeSub;
-          _sleepSubscore = sleepSub;
-          _nutritionSubscore = nutriSub;
-          _mindfulnessSubscore = mindSub;
-          _lastSynced = DateTime.now();
-        });
-
-        // Save to SharedPreferences cache
-        await prefs.setInt('cached_wellness_score', score);
-        await prefs.setInt('cached_active_subscore', activeSub);
-        await prefs.setInt('cached_sleep_subscore', sleepSub);
-        await prefs.setInt('cached_nutrition_subscore', nutriSub);
-        await prefs.setInt('cached_mindfulness_subscore', mindSub);
-        await prefs.setString('cached_daily_summary', summary);
-        await prefs.setStringList('cached_recommendations', recs);
-        await prefs.setString('cached_ai_buddy_message', buddyMsg);
-        await prefs.setString(
-          'last_sync_timestamp',
-          _lastSynced!.toIso8601String(),
-        );
-
+        // Debug log the full JSON payload
         debugPrint(
-          "Successfully executed merged sync and updated local dashboard cache.",
+          "================ MERGED HOME SYNC JSON PAYLOAD (LAST 7 DAYS DAILY) ================",
         );
-      } else {
+        debugPrint(const JsonEncoder.withIndent('  ').convert(syncPayload));
         debugPrint(
-          "Failed to execute merged sync: ${response.statusCode} - ${response.body}",
+          "===================================================================================",
         );
+
+        final response = await http.post(
+          Uri.parse(syncUrl),
+          headers: {
+            'Content-Type': 'application/json',
+            if (token != null) 'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode(syncPayload),
+        );
+
+        // Debug log the full JSON response
+        debugPrint(
+          "================ MERGED HOME SYNC API RESPONSE ================",
+        );
+        debugPrint("Status Code: ${response.statusCode}");
+        debugPrint("Response Body: ${response.body}");
+        debugPrint(
+          "=================================================================",
+        );
+
+        if (response.statusCode == 200) {
+          final resData = jsonDecode(response.body);
+          final int score = resData['wellness_score'] ?? 75;
+          final String summary = resData['daily_summary'] ?? "";
+          final List<String> recs = List<String>.from(
+            resData['recommendations'] ?? [],
+          );
+          final String buddyMsg =
+              resData['ai_buddy_message'] ?? "Hi! I am your AI Buddy.";
+          final int activeSub = resData['active_subscore'] ?? 0;
+          final int sleepSub = resData['sleep_subscore'] ?? 0;
+          final int nutriSub = resData['nutrition_subscore'] ?? 0;
+          final int mindSub = resData['mindfulness_subscore'] ?? 0;
+          final int apiWaterToday = resData['water_intake_today'] ?? 0;
+
+          await HealthService.instance.initializeWaterIntakeFromApi(
+            apiWaterToday.toDouble(),
+          );
+
+          setState(() {
+            _serverWellnessScore = score;
+            _serverDailySummary = summary;
+            _serverRecommendations = recs;
+            _activeSubscore = activeSub;
+            _sleepSubscore = sleepSub;
+            _nutritionSubscore = nutriSub;
+            _mindfulnessSubscore = mindSub;
+            _lastSynced = DateTime.now();
+          });
+
+          // Save to SharedPreferences cache
+          await prefs.setInt('cached_wellness_score', score);
+          await prefs.setInt('cached_active_subscore', activeSub);
+          await prefs.setInt('cached_sleep_subscore', sleepSub);
+          await prefs.setInt('cached_nutrition_subscore', nutriSub);
+          await prefs.setInt('cached_mindfulness_subscore', mindSub);
+          await prefs.setString('cached_daily_summary', summary);
+          await prefs.setStringList('cached_recommendations', recs);
+          await prefs.setString('cached_ai_buddy_message', buddyMsg);
+          await prefs.setString(
+            'last_sync_timestamp',
+            _lastSynced!.toIso8601String(),
+          );
+
+          debugPrint(
+            "Successfully executed merged sync and updated local dashboard cache.",
+          );
+        } else {
+          debugPrint(
+            "Failed to execute merged sync: ${response.statusCode} - ${response.body}",
+          );
+        }
+      } catch (e) {
+        debugPrint("Error in _syncAndRefreshDashboard combined flow: $e");
       }
-    } catch (e) {
-      debugPrint("Error in _syncAndRefreshDashboard combined flow: $e");
+    }();
+
+    HealthService.instance.homeSyncFuture = future;
+    try {
+      await future;
+    } finally {
+      HealthService.instance.homeSyncFuture = null;
     }
   }
 
@@ -3779,7 +3792,7 @@ class DashboardScreenState extends State<DashboardScreen>
     final labelColor = isDark ? Colors.white60 : Colors.black54;
 
     return FutureBuilder<List<Map<String, dynamic>>>(
-      future: HealthService.instance.fetchDailyHealthDataForPeriod(days: 7),
+      future: _dailyRecordsFuture,
       builder: (context, snapshot) {
         List<Map<String, dynamic>> records = [];
         bool isLoading = true;

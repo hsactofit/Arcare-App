@@ -231,6 +231,9 @@ class HealthService {
 
   final _health = Health();
 
+  /// Track if the merged home sync API is in progress
+  Future<void>? homeSyncFuture;
+
   // Platform-specific supported data types
   static const List<HealthDataType> _androidTypes = [
     HealthDataType.STEPS,
@@ -592,8 +595,12 @@ class HealthService {
     }
   }
 
+  Future<HealthData>? _activeFetchFuture;
+
   /// Fetch health data for the current day (last 24 hours).
   Future<HealthData> fetchHealthData({bool forceRefresh = false}) async {
+    await initialize();
+
     if (!forceRefresh && _cachedHealthData != null && _lastFetchTime != null) {
       final elapsed = DateTime.now().difference(_lastFetchTime!);
       if (elapsed < _cacheDuration) {
@@ -602,8 +609,21 @@ class HealthService {
       }
     }
 
-    await initialize();
+    if (_activeFetchFuture != null) {
+      debugPrint("A fetchHealthData request is already in progress. Coalescing request.");
+      return _activeFetchFuture!;
+    }
 
+    final future = _fetchHealthDataRaw(forceRefresh: forceRefresh);
+    _activeFetchFuture = future;
+    try {
+      return await future;
+    } finally {
+      _activeFetchFuture = null;
+    }
+  }
+
+  Future<HealthData> _fetchHealthDataRaw({bool forceRefresh = false}) async {
     final now = DateTime.now();
     final startOfDay = DateTime(now.year, now.month, now.day);
     final startOfSleep = now.subtract(const Duration(hours: 24));
@@ -1111,10 +1131,15 @@ class HealthService {
 
     _cachedHealthData = result;
     _lastFetchTime = DateTime.now();
+    await _savePersistentCache();
     return result;
   }
 
+  Future<List<Map<String, dynamic>>>? _activeDailyFetchFuture;
+
   Future<List<Map<String, dynamic>>> fetchDailyHealthDataForPeriod({int days = 7, bool forceRefresh = false}) async {
+    await initialize();
+
     if (!forceRefresh &&
         _cachedDailyRecords != null &&
         _lastDailyFetchTime != null &&
@@ -1126,8 +1151,21 @@ class HealthService {
       }
     }
 
-    await initialize();
+    if (_activeDailyFetchFuture != null) {
+      debugPrint("A fetchDailyHealthDataForPeriod request is already in progress. Coalescing request.");
+      return _activeDailyFetchFuture!;
+    }
 
+    final future = _fetchDailyHealthDataForPeriodRaw(days: days, forceRefresh: forceRefresh);
+    _activeDailyFetchFuture = future;
+    try {
+      return await future;
+    } finally {
+      _activeDailyFetchFuture = null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchDailyHealthDataForPeriodRaw({int days = 7, bool forceRefresh = false}) async {
     final now = DateTime.now();
 
     // Check if we can perform a today-only merge to avoid fetching historical days again
