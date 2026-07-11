@@ -77,7 +77,7 @@ class _GoalsConfigurationScreenState extends State<GoalsConfigurationScreen>
           final token = await AuthService.instance.getAccessToken();
           final syncUrl = '${AuthService.apiBaseUrl}/api/goals/update/${Uri.encodeComponent(email)}';
           
-          await http.post(
+          final response = await http.post(
             Uri.parse(syncUrl),
             headers: {
               'Content-Type': 'application/json',
@@ -91,6 +91,12 @@ class _GoalsConfigurationScreenState extends State<GoalsConfigurationScreen>
               'exercise_goal': _exerciseGoal,
             }),
           );
+
+          // Debug log the goals update API response
+          debugPrint("================ GOALS UPDATE API RESPONSE ================");
+          debugPrint("Status Code: ${response.statusCode}");
+          debugPrint("Response Body: ${response.body}");
+          debugPrint("===========================================================");
         }
       }
     } catch (e) {

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:health/health.dart';
@@ -16,6 +17,7 @@ import '../services/auth_service.dart';
 import 'onboarding_screen.dart';
 import 'water_logging_screen.dart';
 import 'metric_detail_screen.dart';
+import '../widgets/water/wave_painter.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -25,7 +27,11 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class DashboardScreenState extends State<DashboardScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
+  late AnimationController _waterWaveController;
+  final List<BubbleParticle> _waterBubbles = [];
+  final Random _random = Random();
+
   HealthConnectSdkStatus? _sdkStatus;
   bool _isConnected = false;
   bool _isSyncing = false;
@@ -60,6 +66,47 @@ class DashboardScreenState extends State<DashboardScreen>
     super.initState();
     _loadSetupState();
     _checkStatusAndSync();
+
+    _waterWaveController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    )..repeat();
+
+    for (int i = 0; i < 15; i++) {
+      _waterBubbles.add(
+        BubbleParticle(
+          x: _random.nextDouble(),
+          y: _random.nextDouble(),
+          radius: 1.5 + _random.nextDouble() * 3.0,
+          speed: 0.002 + _random.nextDouble() * 0.003,
+        ),
+      );
+    }
+    _waterWaveController.addListener(_updateWaterBubbles);
+  }
+
+  @override
+  void dispose() {
+    _waterWaveController.removeListener(_updateWaterBubbles);
+    _waterWaveController.dispose();
+    super.dispose();
+  }
+
+  void _updateWaterBubbles() {
+    if (!mounted) return;
+    final progress = (_healthData.waterIntake / _waterGoal).clamp(0.0, 1.0);
+    setState(() {
+      for (var bubble in _waterBubbles) {
+        bubble.y -= bubble.speed;
+        bubble.x += sin(_waterWaveController.value * 2 * pi + bubble.y * 10) * 0.002;
+
+        final double waterTopY = 1.0 - progress;
+        if (bubble.y < waterTopY || bubble.x < 0 || bubble.x > 1) {
+          bubble.y = 1.0;
+          bubble.x = _random.nextDouble();
+        }
+      }
+    });
   }
 
   Future<void> _loadSetupState() async {
@@ -344,13 +391,14 @@ class DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _fetchRealData({bool forceSync = false}) async {
-    // 1. Always load the active local Health Connect data to update the UI cards
-    final data = await HealthService.instance.fetchHealthData();
-    setState(() {
-      _healthData = data;
-    });
-
+    setState(() => _isSyncing = true);
     try {
+      // 1. Always load the active local Health Connect data to update the UI cards
+      final data = await HealthService.instance.fetchHealthData();
+      setState(() {
+        _healthData = data;
+      });
+
       final prefs = await SharedPreferences.getInstance();
 
       // 2. Populate states from the local cache immediately for an instant load
@@ -422,6 +470,8 @@ class DashboardScreenState extends State<DashboardScreen>
       }
     } catch (e) {
       debugPrint("Error in _fetchRealData combined flow: $e");
+    } finally {
+      setState(() => _isSyncing = false);
     }
   }
 
@@ -454,6 +504,16 @@ class DashboardScreenState extends State<DashboardScreen>
           if (token != null) 'Authorization': 'Bearer $token',
         },
         body: jsonEncode(syncPayload),
+      );
+
+      // Debug log the full JSON response
+      debugPrint(
+        "================ MERGED HOME SYNC API RESPONSE ================",
+      );
+      debugPrint("Status Code: ${response.statusCode}");
+      debugPrint("Response Body: ${response.body}");
+      debugPrint(
+        "=================================================================",
       );
 
       if (response.statusCode == 200) {
@@ -2111,6 +2171,7 @@ class DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildWaterIntakeSliver(ThemeData theme, bool isDark) {
+    final progress = (_healthData.waterIntake / _waterGoal).clamp(0.0, 1.0);
     return SliverToBoxAdapter(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2163,36 +2224,9 @@ class DashboardScreenState extends State<DashboardScreen>
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: LinearProgressIndicator(
-                  value: (_healthData.waterIntake / _waterGoal).clamp(0.0, 1.0),
-                  minHeight: 10,
-                  backgroundColor: Colors.blue.withOpacity(0.1),
-                  color: Colors.blue,
-                ),
-              ),
               const SizedBox(height: 16),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue.withOpacity(0.12),
-                  shadowColor: Colors.transparent,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
-                    side: const BorderSide(color: Colors.blue, width: 1),
-                  ),
-                ),
-                icon: const Icon(Icons.add, color: Colors.blue),
-                label: const Text(
-                  "Log Water Intake",
-                  style: TextStyle(
-                    color: Colors.blue,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                onPressed: () {
+              GestureDetector(
+                onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -2206,6 +2240,97 @@ class DashboardScreenState extends State<DashboardScreen>
                     _fetchRealData(forceSync: false);
                   });
                 },
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    height: 100,
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.02),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: AnimatedBuilder(
+                            animation: _waterWaveController,
+                            builder: (context, child) {
+                              return CustomPaint(
+                                painter: WavePainter(
+                                  progress: progress,
+                                  wavePhase: _waterWaveController.value * 2 * pi,
+                                  bubbles: _waterBubbles,
+                                  isDark: isDark,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        Positioned.fill(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Colors.black.withOpacity(isDark ? 0.35 : 0.05),
+                                  Colors.black.withOpacity(isDark ? 0.1 : 0.0),
+                                ],
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                              ),
+                            ),
+                            child: Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(
+                                        Icons.water_drop,
+                                        color: Colors.white,
+                                        size: 20,
+                                        shadows: [
+                                          Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 1)),
+                                        ],
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        "${(progress * 100).round()}% Target Met",
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w900,
+                                          fontSize: 15,
+                                          shadows: [
+                                            Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 1)),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  const Text(
+                                    "Tap anywhere to log water intake",
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      shadows: [
+                                        Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 1)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
@@ -2314,13 +2439,13 @@ class DashboardScreenState extends State<DashboardScreen>
                 : "--",
             unit: "bpm",
             icon: "💓",
-            color: Colors.red,
+            color: const Color(0xFFC72C3A),
             subtitle: "Realtime reading",
             onTap: () => _navigateToMetricDetail(
               'heart_rate',
               'Heart Rate',
               '💓',
-              Colors.red,
+              const Color(0xFFC72C3A),
             ),
           ),
           MetricCard(
@@ -2330,13 +2455,13 @@ class DashboardScreenState extends State<DashboardScreen>
                 : "--",
             unit: "bpm",
             icon: "💤",
-            color: Colors.indigo,
+            color: const Color(0xFFC72C3A),
             subtitle: "Average pulse",
             onTap: () => _navigateToMetricDetail(
               'heart_rate',
               'Heart Rate',
               '💤',
-              Colors.indigo,
+              const Color(0xFFC72C3A),
             ),
           ),
           MetricCard(
@@ -2408,14 +2533,14 @@ class DashboardScreenState extends State<DashboardScreen>
                 : "--",
             unit: "",
             icon: "🌙",
-            color: Colors.purpleAccent,
+            color: const Color(0xFF5A5AE6),
             progress: _healthData.sleepDuration / _sleepGoal,
             subtitle: "Goal: ${_sleepGoal.round()} hrs",
             onTap: () => _navigateToMetricDetail(
               'sleep',
               'Sleep',
               '🌙',
-              Colors.purpleAccent,
+              const Color(0xFF5A5AE6),
             ),
           ),
           MetricCard(
@@ -2515,6 +2640,444 @@ class DashboardScreenState extends State<DashboardScreen>
     });
   }
 
+  Widget _buildStepsCard(bool isDark, double steps, double goal, VoidCallback onTap) {
+    final gradient = isDark
+        ? const LinearGradient(
+            colors: [Color(0xFF132320), Color(0xFF0E1A18)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          )
+        : const LinearGradient(
+            colors: [Color(0xFFE8F5F2), Color(0xFFD3EBE5)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          );
+    final borderColor = isDark
+        ? const Color(0xFF1F3530).withOpacity(0.8)
+        : const Color(0xFFB9DDD3);
+    final textColor = isDark ? Colors.white : const Color(0xFF1E2843);
+    final progress = (steps / goal).clamp(0.0, 1.0);
+
+    return Container(
+      height: 140,
+      decoration: BoxDecoration(
+        gradient: gradient,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: borderColor, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.2 : 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(28),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Text("👣", style: TextStyle(fontSize: 16)),
+                    const SizedBox(width: 6),
+                    Text(
+                      "STEPS",
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w900,
+                        color: isDark ? const Color(0xFF38E5A6) : const Color(0xFF4C8D80),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+                Text(
+                  _formatWithCommas(steps.round()),
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    color: textColor,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          minHeight: 7,
+                          backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.04),
+                          valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF006D56)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      "${(progress * 100).round()}%",
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w900,
+                        color: isDark ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatWithCommas(int value) {
+    return value.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]},',
+    );
+  }
+
+  Widget _buildHeartRateCard(bool isDark, double bpm, double restingBpm, VoidCallback onTap) {
+    final gradient = isDark
+        ? const LinearGradient(
+            colors: [Color(0xFF2D1418), Color(0xFF1E0C0E)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          )
+        : const LinearGradient(
+            colors: [Color(0xFFFFF0F2), Color(0xFFFCDCE1)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          );
+    final borderColor = isDark
+        ? const Color(0xFF3F1F24).withOpacity(0.8)
+        : const Color(0xFFF5CCD2);
+    final textColor = isDark ? Colors.white : const Color(0xFF1E2843);
+
+    return SizedBox(
+      height: 140,
+      child: Center(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final double circleSize = min(constraints.maxWidth - 4, 122.0);
+            return SizedBox(
+              width: circleSize,
+              height: circleSize,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: gradient,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: borderColor, width: 1.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(isDark ? 0.25 : 0.02),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: onTap,
+                        customBorder: const CircleBorder(),
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Text("❤️", style: TextStyle(fontSize: 18)),
+                              const SizedBox(height: 5),
+                              Text(
+                                bpm > 0 ? bpm.round().toString() : "--",
+                                style: TextStyle(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w900,
+                                  color: textColor,
+                                  height: 1.1,
+                                ),
+                              ),
+                              const Text(
+                                "bpm",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: -2,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1D1D23) : Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isDark ? Colors.white12 : const Color(0xFFF5CCD2),
+                            width: 1.0,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.04),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          "Resting: ${restingBpm > 0 ? restingBpm.round() : '--'}",
+                          style: const TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFFC72C3A),
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCaloriesCard(bool isDark, double calories, double goal, VoidCallback onTap) {
+    final gradient = isDark
+        ? const LinearGradient(
+            colors: [Color(0xFF281B10), Color(0xFF1B1109)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          )
+        : const LinearGradient(
+            colors: [Color(0xFFFFF8EE), Color(0xFFF7E6D0)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          );
+    final borderColor = isDark
+        ? const Color(0xFF392719).withOpacity(0.8)
+        : const Color(0xFFEFD5B5);
+    final textColor = isDark ? Colors.white : const Color(0xFF1E2843);
+
+    return Container(
+      height: 140,
+      decoration: BoxDecoration(
+        gradient: gradient,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: borderColor, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.2 : 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(28),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Text("🔥", style: TextStyle(fontSize: 16)),
+                    const SizedBox(width: 6),
+                    Text(
+                      "Calories",
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w900,
+                        color: isDark ? const Color(0xFFFFB03A) : Colors.grey[700],
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Text(
+                      calories.round().toString(),
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                        color: textColor,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Text(
+                      "kcal",
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  ],
+                ),
+                Text(
+                  "Goal: ${goal.round()}",
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFFE08200),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSleepCard(bool isDark, double sleepHours, double goal, VoidCallback onTap) {
+    final gradient = isDark
+        ? const LinearGradient(
+            colors: [Color(0xFF181628), Color(0xFF100F1B)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          )
+        : const LinearGradient(
+            colors: [Color(0xFFF2F2FC), Color(0xFFDFDFFA)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          );
+    final borderColor = isDark
+        ? const Color(0xFF25233E).withOpacity(0.8)
+        : const Color(0xFFCDCDFA);
+    final textColor = isDark ? Colors.white : const Color(0xFF1E2843);
+    final progress = (sleepHours / goal).clamp(0.0, 1.0);
+
+    return Container(
+      height: 140,
+      decoration: BoxDecoration(
+        gradient: gradient,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: borderColor, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.2 : 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(28),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          const Text("🌙", style: TextStyle(fontSize: 14)),
+                          const SizedBox(width: 5),
+                          const Text(
+                            "SLEEP",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF5A5AE6),
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "${sleepHours.toInt()}h",
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                              color: textColor,
+                              height: 1.05,
+                            ),
+                          ),
+                          Text(
+                            "${((sleepHours - sleepHours.toInt()) * 60).round()}m",
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                              color: textColor,
+                              height: 1.05,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        "Goal: ${goal.round()}h",
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white30 : Colors.black45,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Center(
+                child: Container(
+                  width: 54,
+                  height: 54,
+                  padding: const EdgeInsets.all(3),
+                  child: CustomPaint(
+                    painter: SleepRingPainter(
+                      progress: progress,
+                      color: const Color(0xFF5A5AE6),
+                      strokeWidth: 5.0,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -2586,8 +3149,14 @@ class DashboardScreenState extends State<DashboardScreen>
 
           // 2. Main Content
           SafeArea(
-            child: CustomScrollView(
-              physics: const BouncingScrollPhysics(),
+            child: RefreshIndicator(
+              onRefresh: () => _fetchRealData(forceSync: true),
+              color: const Color(0xFFFF6D55),
+              backgroundColor: isDark ? const Color(0xFF1E1E24) : Colors.white,
+              child: CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
+                ),
               slivers: [
                 // Header (Greeting, Profile, Notification Icon)
                 _buildHeader(theme, isDark),
@@ -2619,80 +3188,84 @@ class DashboardScreenState extends State<DashboardScreen>
                 // Face Scan Banner
                 SliverToBoxAdapter(child: _buildFaceScanBanner(theme, isDark)),
 
-                // 2x2 Grid: Steps, Heart Rate, Calories, Sleep
-                SliverPadding(
-                  padding: const EdgeInsets.symmetric(horizontal: 11),
-                  sliver: SliverGrid.count(
-                    crossAxisCount: 2,
-                    childAspectRatio: 1.22,
-                    children: [
-                      MetricCard(
-                        title: "Steps",
-                        value: _healthData.steps > 0
-                            ? _healthData.steps.round().toString()
-                            : "--",
-                        unit: "",
-                        icon: "👣",
-                        color: const Color(0xFF2EE5A3),
-                        subtitle: "Goal: ${_stepGoal.round()}",
-                        onTap: () => _navigateToMetricDetail(
-                          'steps',
-                          'Steps',
-                          '👣',
-                          const Color(0xFF2EE5A3),
+                // Asymmetric Staggered Width Rows: Row 1 (Steps wide + HR circle), Row 2 (Calories + Sleep wide)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Row 1: Steps (wide) & Heart Rate (narrow/circle)
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: _buildStepsCard(
+                                isDark,
+                                _healthData.steps,
+                                _stepGoal,
+                                () => _navigateToMetricDetail(
+                                  'steps',
+                                  'Steps',
+                                  '👣',
+                                  const Color(0xFF006D56),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 2,
+                              child: _buildHeartRateCard(
+                                isDark,
+                                _healthData.heartRate,
+                                _healthData.restingHeartRate > 0 ? _healthData.restingHeartRate : 64.0,
+                                () => _navigateToMetricDetail(
+                                  'heart_rate',
+                                  'Heart Rate',
+                                  '❤️',
+                                  const Color(0xFFC72C3A),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      MetricCard(
-                        title: "Heart Rate",
-                        value: _healthData.heartRate > 0
-                            ? "${_healthData.heartRate.round()}"
-                            : "--",
-                        unit: _healthData.heartRate > 0 ? "bpm" : "",
-                        icon: "❤️",
-                        color: const Color(0xFFFF6D55),
-                        subtitle: _healthData.heartRate > 0
-                            ? "bpm avg"
-                            : "No readings",
-                        onTap: () => _navigateToMetricDetail(
-                          'heart_rate',
-                          'Heart Rate',
-                          '❤️',
-                          const Color(0xFFFF6D55),
+                        const SizedBox(height: 12),
+                        // Row 2: Calories (narrow) & Sleep (wide)
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 2,
+                              child: _buildCaloriesCard(
+                                isDark,
+                                _healthData.activeCalories,
+                                _calorieGoal,
+                                () => _navigateToMetricDetail(
+                                  'calories',
+                                  'Calories',
+                                  '🔥',
+                                  const Color(0xFFE08200),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 3,
+                              child: _buildSleepCard(
+                                isDark,
+                                _healthData.sleepDuration,
+                                _sleepGoal,
+                                () => _navigateToMetricDetail(
+                                  'sleep',
+                                  'Sleep',
+                                  '🌙',
+                                  const Color(0xFF5A5AE6),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      MetricCard(
-                        title: "Calories",
-                        value: _healthData.activeCalories > 0
-                            ? "${_healthData.activeCalories.round()}"
-                            : "--",
-                        unit: _healthData.activeCalories > 0 ? "kcal" : "",
-                        icon: "🔥",
-                        color: const Color(0xFFFFB03A),
-                        subtitle: "Goal: ${_calorieGoal.round()} kcal",
-                        onTap: () => _navigateToMetricDetail(
-                          'calories',
-                          'Calories',
-                          '🔥',
-                          const Color(0xFFFFB03A),
-                        ),
-                      ),
-                      MetricCard(
-                        title: "Sleep",
-                        value: _healthData.sleepDuration > 0
-                            ? "${_healthData.sleepDuration.toInt()}h ${((_healthData.sleepDuration - _healthData.sleepDuration.toInt()) * 60).toInt()}m"
-                            : "--",
-                        unit: "",
-                        icon: "🌙",
-                        color: const Color(0xFF8F6BFF),
-                        subtitle: "Goal: ${_sleepGoal.round()} hrs",
-                        onTap: () => _navigateToMetricDetail(
-                          'sleep',
-                          'Sleep',
-                          '🌙',
-                          const Color(0xFF8F6BFF),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
 
@@ -2732,6 +3305,7 @@ class DashboardScreenState extends State<DashboardScreen>
               ],
             ),
           ),
+        ),
           if (_isSyncing)
             Positioned(
               top: 0,
@@ -3657,3 +4231,48 @@ class GoogleFitSetupGuideScreen extends StatelessWidget {
     );
   }
 }
+
+class SleepRingPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+  final double strokeWidth;
+
+  SleepRingPainter({
+    required this.progress,
+    required this.color,
+    this.strokeWidth = 5.0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double radius = min(size.width / 2, size.height / 2) - strokeWidth / 2;
+    final Offset center = Offset(size.width / 2, size.height / 2);
+
+    final Paint bgPaint = Paint()
+      ..color = color.withOpacity(0.12)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+
+    final Paint fgPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = strokeWidth;
+
+    canvas.drawCircle(center, radius, bgPaint);
+
+    final double sweepAngle = 2 * pi * progress.clamp(0.0, 1.0);
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -pi / 2,
+      sweepAngle,
+      false,
+      fgPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant SleepRingPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.color != color;
+}
+

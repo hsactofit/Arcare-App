@@ -96,6 +96,12 @@ class _AIScreenState extends State<AIScreen> {
         }),
       );
 
+      // Debug log the full JSON response
+      debugPrint("================ AI CHAT API RESPONSE ================");
+      debugPrint("Status Code: ${response.statusCode}");
+      debugPrint("Response Body: ${response.body}");
+      debugPrint("======================================================");
+
       if (!mounted) return;
 
       if (response.statusCode == 200) {

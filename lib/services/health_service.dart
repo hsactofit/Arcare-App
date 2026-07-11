@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:health/health.dart';
@@ -23,6 +24,30 @@ class MedicalRecord {
     required this.provider,
     required this.details,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'category': category,
+      'title': title,
+      'date': date.toIso8601String(),
+      'status': status,
+      'provider': provider,
+      'details': details,
+    };
+  }
+
+  factory MedicalRecord.fromJson(Map<String, dynamic> json) {
+    return MedicalRecord(
+      id: json['id'] as String? ?? "",
+      category: json['category'] as String? ?? "",
+      title: json['title'] as String? ?? "",
+      date: DateTime.tryParse(json['date'] as String? ?? "") ?? DateTime.now(),
+      status: json['status'] as String? ?? "",
+      provider: json['provider'] as String? ?? "",
+      details: json['details'] as String? ?? "",
+    );
+  }
 }
 
 class HealthData {
@@ -135,6 +160,69 @@ class HealthData {
       medicalRecords: medicalRecords ?? this.medicalRecords,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'steps': steps,
+      'distance': distance,
+      'activeCalories': activeCalories,
+      'basalCalories': basalCalories,
+      'workouts': workouts,
+      'exerciseMinutes': exerciseMinutes,
+      'heartRate': heartRate,
+      'restingHeartRate': restingHeartRate,
+      'sleepDuration': sleepDuration,
+      'sleepQuality': sleepQuality,
+      'weight': weight,
+      'bmi': bmi,
+      'bodyFat': bodyFat,
+      'systolicBP': systolicBP,
+      'diastolicBP': diastolicBP,
+      'bloodGlucose': bloodGlucose,
+      'spo2': spo2,
+      'waterIntake': waterIntake,
+      'mindfulnessMinutes': mindfulnessMinutes,
+      'carbs': carbs,
+      'protein': protein,
+      'fat': fat,
+      'nutritionCalories': nutritionCalories,
+      'medicalRecordsConsented': medicalRecordsConsented,
+      'medicalRecords': medicalRecords.map((e) => e.toJson()).toList(),
+    };
+  }
+
+  factory HealthData.fromJson(Map<String, dynamic> json) {
+    return HealthData(
+      steps: (json['steps'] as num?)?.toDouble() ?? 0.0,
+      distance: (json['distance'] as num?)?.toDouble() ?? 0.0,
+      activeCalories: (json['activeCalories'] as num?)?.toDouble() ?? 0.0,
+      basalCalories: (json['basalCalories'] as num?)?.toDouble() ?? 0.0,
+      workouts: json['workouts'] as int? ?? 0,
+      exerciseMinutes: (json['exerciseMinutes'] as num?)?.toDouble() ?? 0.0,
+      heartRate: (json['heartRate'] as num?)?.toDouble() ?? 0.0,
+      restingHeartRate: (json['restingHeartRate'] as num?)?.toDouble() ?? 0.0,
+      sleepDuration: (json['sleepDuration'] as num?)?.toDouble() ?? 0.0,
+      sleepQuality: json['sleepQuality'] as String? ?? "--",
+      weight: (json['weight'] as num?)?.toDouble() ?? 0.0,
+      bmi: (json['bmi'] as num?)?.toDouble() ?? 0.0,
+      bodyFat: (json['bodyFat'] as num?)?.toDouble(),
+      systolicBP: (json['systolicBP'] as num?)?.toDouble() ?? 0.0,
+      diastolicBP: (json['diastolicBP'] as num?)?.toDouble() ?? 0.0,
+      bloodGlucose: (json['bloodGlucose'] as num?)?.toDouble() ?? 0.0,
+      spo2: (json['spo2'] as num?)?.toDouble() ?? 0.0,
+      waterIntake: (json['waterIntake'] as num?)?.toDouble() ?? 0.0,
+      mindfulnessMinutes: (json['mindfulnessMinutes'] as num?)?.toDouble() ?? 0.0,
+      carbs: (json['carbs'] as num?)?.toDouble() ?? 0.0,
+      protein: (json['protein'] as num?)?.toDouble() ?? 0.0,
+      fat: (json['fat'] as num?)?.toDouble() ?? 0.0,
+      nutritionCalories: (json['nutritionCalories'] as num?)?.toDouble() ?? 0.0,
+      medicalRecordsConsented: json['medicalRecordsConsented'] as bool? ?? false,
+      medicalRecords: (json['medicalRecords'] as List?)
+              ?.map((e) => MedicalRecord.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
+    );
+  }
 }
 
 class HealthService {
@@ -227,10 +315,65 @@ class HealthService {
 
   HealthData? _cachedHealthData;
   DateTime? _lastFetchTime;
-  static const Duration _cacheDuration = Duration(seconds: 30);
+  static const Duration _cacheDuration = Duration(minutes: 10);
+
+  List<Map<String, dynamic>>? _cachedDailyRecords;
+  DateTime? _lastDailyFetchTime;
+  int? _cachedDailyDays;
+  static const Duration _dailyCacheDuration = Duration(minutes: 10);
 
   double? _localWaterIntake;
   double get localWaterIntake => _localWaterIntake ?? 0.0;
+
+  Future<void> _loadPersistentCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Load health data
+      final healthJson = prefs.getString('cached_health_data_object');
+      final healthTimeStr = prefs.getString('cached_health_data_time');
+      if (healthJson != null && healthTimeStr != null) {
+        _cachedHealthData = HealthData.fromJson(jsonDecode(healthJson));
+        _lastFetchTime = DateTime.tryParse(healthTimeStr);
+        debugPrint("Loaded persistent HealthData cache (timestamp: $_lastFetchTime)");
+      }
+
+      // Load daily records
+      final dailyJson = prefs.getString('cached_daily_records_list');
+      final dailyTimeStr = prefs.getString('cached_daily_records_time');
+      final dailyDays = prefs.getInt('cached_daily_records_days');
+      if (dailyJson != null && dailyTimeStr != null && dailyDays != null) {
+        final decoded = jsonDecode(dailyJson) as List;
+        _cachedDailyRecords = decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        _lastDailyFetchTime = DateTime.tryParse(dailyTimeStr);
+        _cachedDailyDays = dailyDays;
+        debugPrint("Loaded persistent daily records cache (timestamp: $_lastDailyFetchTime)");
+      }
+    } catch (e) {
+      debugPrint("Error loading persistent cache: $e");
+    }
+  }
+
+  Future<void> _savePersistentCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Save health data
+      if (_cachedHealthData != null && _lastFetchTime != null) {
+        await prefs.setString('cached_health_data_object', jsonEncode(_cachedHealthData!.toJson()));
+        await prefs.setString('cached_health_data_time', _lastFetchTime!.toIso8601String());
+      }
+      
+      // Save daily records
+      if (_cachedDailyRecords != null && _lastDailyFetchTime != null && _cachedDailyDays != null) {
+        await prefs.setString('cached_daily_records_list', jsonEncode(_cachedDailyRecords));
+        await prefs.setString('cached_daily_records_time', _lastDailyFetchTime!.toIso8601String());
+        await prefs.setInt('cached_daily_records_days', _cachedDailyDays!);
+      }
+    } catch (e) {
+      debugPrint("Error saving persistent cache: $e");
+    }
+  }
 
   Future<void> syncWaterIntakeWithPrefs() async {
     final prefs = await SharedPreferences.getInstance();
@@ -274,9 +417,17 @@ class HealthService {
     _localWaterIntake = null;
     _cachedHealthData = null;
     _lastFetchTime = null;
+    _cachedDailyRecords = null;
+    _lastDailyFetchTime = null;
+    _cachedDailyDays = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('local_water_intake_today');
     await prefs.remove('local_water_date');
+    await prefs.remove('cached_health_data_object');
+    await prefs.remove('cached_health_data_time');
+    await prefs.remove('cached_daily_records_list');
+    await prefs.remove('cached_daily_records_time');
+    await prefs.remove('cached_daily_records_days');
     debugPrint("Local health service water state reset.");
   }
 
@@ -331,6 +482,7 @@ class HealthService {
       await _health.configure();
       _isInitialized = true;
       debugPrint("HealthService configured successfully.");
+      await _loadPersistentCache();
     } catch (e) {
       debugPrint("Error configuring HealthService: $e");
     }
@@ -490,7 +642,17 @@ class HealthService {
         );
         data.addAll(typeData);
       } catch (e) {
-        debugPrint("Error fetching health data in batch: $e. Falling back to sequential fetching.");
+        debugPrint("Error fetching health data in batch: $e");
+        final errStr = e.toString().toLowerCase();
+        if (errStr.contains("quota") || errStr.contains("limit") || errStr.contains("remoteexception")) {
+          if (_cachedHealthData != null) {
+            debugPrint("Rate limit or quota hit during batch fetch. Returning cached HealthData.");
+            return _cachedHealthData!;
+          }
+          rethrow;
+        }
+
+        debugPrint("Falling back to sequential fetching.");
         for (final type in readTypes) {
           try {
             final typeData = await _health.getHealthDataFromTypes(
@@ -501,6 +663,13 @@ class HealthService {
             data.addAll(typeData);
           } catch (err) {
             debugPrint("Error fetching health data type $type: $err");
+            final errStrSub = err.toString().toLowerCase();
+            if (errStrSub.contains("quota") || errStrSub.contains("limit") || errStrSub.contains("remoteexception")) {
+              if (_cachedHealthData != null) {
+                debugPrint("Rate limit hit during fallback fetch. Returning cached HealthData.");
+                return _cachedHealthData!;
+              }
+            }
           }
         }
       }
@@ -515,6 +684,13 @@ class HealthService {
         sleepData.addAll(sleepTypeData);
       } catch (e) {
         debugPrint("Error fetching sleep data: $e");
+        final errStr = e.toString().toLowerCase();
+        if (errStr.contains("quota") || errStr.contains("limit") || errStr.contains("remoteexception")) {
+          if (_cachedHealthData != null) {
+            debugPrint("Rate limit hit during sleep fetch. Returning cached HealthData.");
+            return _cachedHealthData!;
+          }
+        }
       }
 
       try {
@@ -524,6 +700,13 @@ class HealthService {
         }
       } catch (e) {
         debugPrint("Error getting aggregated steps: $e");
+        final errStr = e.toString().toLowerCase();
+        if (errStr.contains("quota") || errStr.contains("limit") || errStr.contains("remoteexception")) {
+          if (_cachedHealthData != null) {
+            debugPrint("Rate limit hit during steps fetch. Returning cached HealthData.");
+            return _cachedHealthData!;
+          }
+        }
       }
 
       double fallbackSteps = 0.0;
@@ -678,7 +861,11 @@ class HealthService {
       }
 
     } catch (e) {
-      debugPrint("Error fetching health data: $e");
+      debugPrint("General error during health data fetching: $e");
+      if (_cachedHealthData != null) {
+        debugPrint("Returning cached HealthData on general error.");
+        return _cachedHealthData!;
+      }
     }
 
     String sleepQuality = "--";
@@ -740,6 +927,7 @@ class HealthService {
 
     _cachedHealthData = result;
     _lastFetchTime = DateTime.now();
+    await _savePersistentCache();
     return result;
   }
 
@@ -894,7 +1082,7 @@ class HealthService {
       debugPrint("Error fetching health data for period: $e");
     }
 
-    return HealthData(
+    final result = HealthData(
       steps: steps.roundToDouble(),
       distance: double.parse(distance.toStringAsFixed(2)),
       activeCalories: activeCalories.roundToDouble(),
@@ -920,74 +1108,98 @@ class HealthService {
       medicalRecordsConsented: _isMedicalConsented,
       medicalRecords: medicalRecords,
     );
+
+    _cachedHealthData = result;
+    _lastFetchTime = DateTime.now();
+    return result;
   }
 
-  /// Fetch daily health data records for the last X days.
-  Future<List<Map<String, dynamic>>> fetchDailyHealthDataForPeriod({int days = 7}) async {
+  Future<List<Map<String, dynamic>>> fetchDailyHealthDataForPeriod({int days = 7, bool forceRefresh = false}) async {
+    if (!forceRefresh &&
+        _cachedDailyRecords != null &&
+        _lastDailyFetchTime != null &&
+        _cachedDailyDays == days) {
+      final elapsed = DateTime.now().difference(_lastDailyFetchTime!);
+      if (elapsed < _dailyCacheDuration) {
+        debugPrint("Returning cached daily health records (age: ${elapsed.inSeconds}s)");
+        return _cachedDailyRecords!;
+      }
+    }
+
     await initialize();
 
     final now = DateTime.now();
-    final List<Map<String, dynamic>> dailyRecords = [];
 
-    // Calculate the start of the overall period (X days ago at 00:00:00)
-    final startOfPeriod = DateTime(now.year, now.month, now.day).subtract(Duration(days: days - 1));
-    final startOfSleepPeriod = startOfPeriod.subtract(const Duration(hours: 12));
+    // Check if we can perform a today-only merge to avoid fetching historical days again
+    final targetPastDateStrings = List.generate(days - 1, (i) {
+      final d = DateTime(now.year, now.month, now.day).subtract(Duration(days: i + 1));
+      return "${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
+    });
 
-    final typesToFetch = [
-      HealthDataType.STEPS,
-      HealthDataType.ACTIVE_ENERGY_BURNED,
-      HealthDataType.BASAL_ENERGY_BURNED,
-      HealthDataType.HEART_RATE,
-      HealthDataType.WATER,
-      HealthDataType.WORKOUT,
-    ];
-
-    // Fetch all health data for the entire period in a single batch
-    final List<HealthDataPoint> allHealthData = [];
-    try {
-      final periodData = await _health.getHealthDataFromTypes(
-        startTime: startOfPeriod,
-        endTime: now,
-        types: typesToFetch,
-      );
-      allHealthData.addAll(periodData);
-    } catch (e) {
-      debugPrint("Error fetching daily health data in batch: $e. Falling back to sequential fetching.");
-      // Fallback: fetch type by type for the entire period
-      for (final type in typesToFetch) {
-        try {
-          final typeData = await _health.getHealthDataFromTypes(
-            startTime: startOfPeriod,
-            endTime: now,
-            types: [type],
-          );
-          allHealthData.addAll(typeData);
-        } catch (err) {
-          debugPrint("Error fetching daily health data type $type in fallback: $err");
+    bool canDoTodayOnlyUpdate = !forceRefresh && _cachedDailyRecords != null && _cachedDailyRecords!.isNotEmpty;
+    if (canDoTodayOnlyUpdate) {
+      final cachedDates = _cachedDailyRecords!.map((r) => r['date'] as String).toSet();
+      for (final pastDate in targetPastDateStrings) {
+        if (!cachedDates.contains(pastDate)) {
+          canDoTodayOnlyUpdate = false;
+          break;
         }
       }
     }
 
-    // Fetch all sleep data for the entire period in a single batch
-    final List<HealthDataPoint> allSleepData = [];
-    try {
-      final sleepTypeData = await _health.getHealthDataFromTypes(
-        startTime: startOfSleepPeriod,
-        endTime: now,
-        types: [HealthDataType.SLEEP_ASLEEP],
-      );
-      allSleepData.addAll(sleepTypeData);
-    } catch (e) {
-      debugPrint("Error fetching daily sleep data in batch: $e");
-    }
+    if (canDoTodayOnlyUpdate) {
+      debugPrint("Starting today-only merge for daily health records to avoid rate limit");
+      final startOfToday = DateTime(now.year, now.month, now.day);
+      final todayStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
 
-    for (int i = 0; i < days; i++) {
-      final targetDate = DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
-      final startTime = targetDate;
-      final endTime = i == 0 ? now : DateTime(targetDate.year, targetDate.month, targetDate.day, 23, 59, 59);
-      final dateString = "${targetDate.year}-${targetDate.month.toString().padLeft(2, '0')}-${targetDate.day.toString().padLeft(2, '0')}";
+      final typesToFetch = [
+        HealthDataType.STEPS,
+        HealthDataType.ACTIVE_ENERGY_BURNED,
+        HealthDataType.BASAL_ENERGY_BURNED,
+        HealthDataType.HEART_RATE,
+        HealthDataType.WATER,
+        HealthDataType.WORKOUT,
+      ];
+
+      final List<HealthDataPoint> todayHealthData = [];
+      try {
+        final periodData = await _health.getHealthDataFromTypes(
+          startTime: startOfToday,
+          endTime: now,
+          types: typesToFetch,
+        );
+        todayHealthData.addAll(periodData);
+      } catch (e) {
+        debugPrint("Error fetching today's health data: $e");
+        final errStr = e.toString().toLowerCase();
+        if (errStr.contains("quota") || errStr.contains("limit") || errStr.contains("remoteexception")) {
+          debugPrint("Rate limit or quota hit during today-only fetch. Returning cached records.");
+          return _cachedDailyRecords!;
+        }
+      }
+
+      final List<HealthDataPoint> todaySleepData = [];
+      try {
+        final sleepTypeData = await _health.getHealthDataFromTypes(
+          startTime: startOfToday.subtract(const Duration(hours: 12)),
+          endTime: now,
+          types: [HealthDataType.SLEEP_ASLEEP],
+        );
+        todaySleepData.addAll(sleepTypeData);
+      } catch (e) {
+        debugPrint("Error fetching today's sleep data: $e");
+      }
 
       double steps = 0.0;
+      try {
+        int? stepCount = await _health.getTotalStepsInInterval(startOfToday, now);
+        if (stepCount != null) {
+          steps = stepCount.toDouble();
+        }
+      } catch (e) {
+        debugPrint("Error getting steps for today: $e");
+      }
+
       double activeCalories = 0.0;
       double basalCalories = 0.0;
       int workouts = 0;
@@ -995,93 +1207,275 @@ class HealthService {
       double sleepDuration = 0.0;
       double waterIntake = 0.0;
 
-      try {
-        // Query daily steps for accurate aggregation
-        try {
-          int? stepCount = await _health.getTotalStepsInInterval(startTime, endTime);
-          if (stepCount != null) {
-            steps = stepCount.toDouble();
-          }
-        } catch (e) {
-          debugPrint("Error getting steps for $dateString: $e");
+      double heartRateSum = 0.0;
+      int heartRateCount = 0;
+      double fallbackSteps = 0.0;
+
+      for (var point in todayHealthData) {
+        final double? val = _extractDoubleValue(point);
+        if (val == null) continue;
+
+        switch (point.type) {
+          case HealthDataType.STEPS:
+            fallbackSteps += val;
+            break;
+          case HealthDataType.ACTIVE_ENERGY_BURNED:
+            activeCalories += val;
+            break;
+          case HealthDataType.BASAL_ENERGY_BURNED:
+            basalCalories += val;
+            break;
+          case HealthDataType.HEART_RATE:
+            heartRateSum += val;
+            heartRateCount++;
+            break;
+          case HealthDataType.WATER:
+            waterIntake += val < 10.0 ? val * 1000.0 : val;
+            break;
+          case HealthDataType.WORKOUT:
+            workouts++;
+            break;
+          default:
+            break;
         }
-
-        // Filter the fetched batch data points that fall within this day's start/end times
-        final dayData = allHealthData.where((point) {
-          return point.dateFrom.isAfter(startTime.subtract(const Duration(seconds: 1))) &&
-                 point.dateFrom.isBefore(endTime.add(const Duration(seconds: 1)));
-        }).toList();
-
-        double heartRateSum = 0.0;
-        int heartRateCount = 0;
-        double fallbackSteps = 0.0;
-
-        for (var point in dayData) {
-          final double? val = _extractDoubleValue(point);
-          if (val == null) continue;
-
-          switch (point.type) {
-            case HealthDataType.STEPS:
-              fallbackSteps += val;
-              break;
-            case HealthDataType.ACTIVE_ENERGY_BURNED:
-              activeCalories += val;
-              break;
-            case HealthDataType.BASAL_ENERGY_BURNED:
-              basalCalories += val;
-              break;
-            case HealthDataType.HEART_RATE:
-              heartRateSum += val;
-              heartRateCount++;
-              break;
-            case HealthDataType.WATER:
-              waterIntake += val < 10.0 ? val * 1000.0 : val;
-              break;
-            case HealthDataType.WORKOUT:
-              workouts++;
-              break;
-            default:
-              break;
-          }
-        }
-
-        if (steps == 0.0) {
-          steps = fallbackSteps;
-        }
-
-        if (heartRateCount > 0) {
-          heartRate = heartRateSum / heartRateCount;
-        }
-
-        // Process sleep duration for this day (sleep dateTo lands on this day)
-        double sleepMins = 0;
-        for (var point in allSleepData) {
-          if (point.type == HealthDataType.SLEEP_ASLEEP) {
-            if (point.dateTo.year == targetDate.year &&
-                point.dateTo.month == targetDate.month &&
-                point.dateTo.day == targetDate.day) {
-              sleepMins += point.dateTo.difference(point.dateFrom).inMinutes.toDouble();
-            }
-          }
-        }
-        sleepDuration = sleepMins / 60.0;
-
-      } catch (e) {
-        debugPrint("Error processing health data for $dateString: $e");
       }
 
-      dailyRecords.add({
-        'date': dateString,
+      if (steps == 0.0) {
+        steps = fallbackSteps;
+      }
+
+      if (heartRateCount > 0) {
+        heartRate = heartRateSum / heartRateCount;
+      }
+
+      double sleepMins = 0;
+      for (var point in todaySleepData) {
+        if (point.type == HealthDataType.SLEEP_ASLEEP) {
+          if (point.dateTo.year == now.year &&
+              point.dateTo.month == now.month &&
+              point.dateTo.day == now.day) {
+            sleepMins += point.dateTo.difference(point.dateFrom).inMinutes.toDouble();
+          }
+        }
+      }
+      sleepDuration = sleepMins / 60.0;
+
+      final todayRecord = {
+        'date': todayStr,
         'steps': steps.round(),
         'calories': (activeCalories + basalCalories).round(),
         'sleep_duration_hours': double.parse(sleepDuration.toStringAsFixed(1)),
         'water_intake_ml': waterIntake.round(),
         'workouts_count': workouts,
         'heart_rate_bpm': heartRate.round(),
-      });
+      };
+
+      final List<Map<String, dynamic>> dailyRecords = [];
+      dailyRecords.add(todayRecord);
+
+      // Merge cached historical records
+      for (int i = 1; i < days; i++) {
+        final targetDate = DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
+        final dateString = "${targetDate.year}-${targetDate.month.toString().padLeft(2, '0')}-${targetDate.day.toString().padLeft(2, '0')}";
+        
+        final cachedRec = _cachedDailyRecords!.firstWhere(
+          (r) => r['date'] == dateString,
+          orElse: () => <String, dynamic>{},
+        );
+        
+        if (cachedRec.isNotEmpty) {
+          dailyRecords.add(cachedRec);
+        } else {
+          dailyRecords.add({
+            'date': dateString,
+            'steps': 0,
+            'calories': 0,
+            'sleep_duration_hours': 0.0,
+            'water_intake_ml': 0,
+            'workouts_count': 0,
+            'heart_rate_bpm': 0,
+          });
+        }
+      }
+
+      _cachedDailyRecords = dailyRecords;
+      _lastDailyFetchTime = DateTime.now();
+      _cachedDailyDays = days;
+      await _savePersistentCache();
+      return dailyRecords;
     }
 
-    return dailyRecords;
+    // Full fetch fallback
+    try {
+      final List<Map<String, dynamic>> dailyRecords = [];
+      final startOfPeriod = DateTime(now.year, now.month, now.day).subtract(Duration(days: days - 1));
+      final startOfSleepPeriod = startOfPeriod.subtract(const Duration(hours: 12));
+
+      final typesToFetch = [
+        HealthDataType.STEPS,
+        HealthDataType.ACTIVE_ENERGY_BURNED,
+        HealthDataType.BASAL_ENERGY_BURNED,
+        HealthDataType.HEART_RATE,
+        HealthDataType.WATER,
+        HealthDataType.WORKOUT,
+      ];
+
+      final List<HealthDataPoint> allHealthData = [];
+      try {
+        final periodData = await _health.getHealthDataFromTypes(
+          startTime: startOfPeriod,
+          endTime: now,
+          types: typesToFetch,
+        );
+        allHealthData.addAll(periodData);
+      } catch (e) {
+        debugPrint("Error fetching daily health data in batch: $e");
+        final errStr = e.toString().toLowerCase();
+        if (errStr.contains("quota") || errStr.contains("limit") || errStr.contains("remoteexception")) {
+          if (_cachedDailyRecords != null) {
+            debugPrint("Rate limit or quota hit during daily records batch. Returning cached list.");
+            return _cachedDailyRecords!;
+          }
+          rethrow;
+        }
+
+        debugPrint("Falling back to sequential fetching.");
+        for (final type in typesToFetch) {
+          try {
+            final typeData = await _health.getHealthDataFromTypes(
+              startTime: startOfPeriod,
+              endTime: now,
+              types: [type],
+            );
+            allHealthData.addAll(typeData);
+          } catch (err) {
+            debugPrint("Error fetching daily health data type $type in fallback: $err");
+          }
+        }
+      }
+
+      final List<HealthDataPoint> allSleepData = [];
+      try {
+        final sleepTypeData = await _health.getHealthDataFromTypes(
+          startTime: startOfSleepPeriod,
+          endTime: now,
+          types: [HealthDataType.SLEEP_ASLEEP],
+        );
+        allSleepData.addAll(sleepTypeData);
+      } catch (e) {
+        debugPrint("Error fetching daily sleep data in batch: $e");
+      }
+
+      for (int i = 0; i < days; i++) {
+        final targetDate = DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
+        final startTime = targetDate;
+        final endTime = i == 0 ? now : DateTime(targetDate.year, targetDate.month, targetDate.day, 23, 59, 59);
+        final dateString = "${targetDate.year}-${targetDate.month.toString().padLeft(2, '0')}-${targetDate.day.toString().padLeft(2, '0')}";
+
+        double steps = 0.0;
+        double activeCalories = 0.0;
+        double basalCalories = 0.0;
+        int workouts = 0;
+        double heartRate = 0.0;
+        double sleepDuration = 0.0;
+        double waterIntake = 0.0;
+
+        try {
+          try {
+            int? stepCount = await _health.getTotalStepsInInterval(startTime, endTime);
+            if (stepCount != null) {
+              steps = stepCount.toDouble();
+            }
+          } catch (e) {
+            debugPrint("Error getting steps for $dateString: $e");
+          }
+
+          final dayData = allHealthData.where((point) {
+            return point.dateFrom.isAfter(startTime.subtract(const Duration(seconds: 1))) &&
+                   point.dateFrom.isBefore(endTime.add(const Duration(seconds: 1)));
+          }).toList();
+
+          double heartRateSum = 0.0;
+          int heartRateCount = 0;
+          double fallbackSteps = 0.0;
+
+          for (var point in dayData) {
+            final double? val = _extractDoubleValue(point);
+            if (val == null) continue;
+
+            switch (point.type) {
+              case HealthDataType.STEPS:
+                fallbackSteps += val;
+                break;
+              case HealthDataType.ACTIVE_ENERGY_BURNED:
+                activeCalories += val;
+                break;
+              case HealthDataType.BASAL_ENERGY_BURNED:
+                basalCalories += val;
+                break;
+              case HealthDataType.HEART_RATE:
+                heartRateSum += val;
+                heartRateCount++;
+                break;
+              case HealthDataType.WATER:
+                waterIntake += val < 10.0 ? val * 1000.0 : val;
+                break;
+              case HealthDataType.WORKOUT:
+                workouts++;
+                break;
+              default:
+                break;
+            }
+          }
+
+          if (steps == 0.0) {
+            steps = fallbackSteps;
+          }
+
+          if (heartRateCount > 0) {
+            heartRate = heartRateSum / heartRateCount;
+          }
+
+          double sleepMins = 0;
+          for (var point in allSleepData) {
+            if (point.type == HealthDataType.SLEEP_ASLEEP) {
+              if (point.dateTo.year == targetDate.year &&
+                  point.dateTo.month == targetDate.month &&
+                  point.dateTo.day == targetDate.day) {
+                sleepMins += point.dateTo.difference(point.dateFrom).inMinutes.toDouble();
+              }
+            }
+          }
+          sleepDuration = sleepMins / 60.0;
+
+        } catch (e) {
+          debugPrint("Error processing health data for $dateString: $e");
+        }
+
+        dailyRecords.add({
+          'date': dateString,
+          'steps': steps.round(),
+          'calories': (activeCalories + basalCalories).round(),
+          'sleep_duration_hours': double.parse(sleepDuration.toStringAsFixed(1)),
+          'water_intake_ml': waterIntake.round(),
+          'workouts_count': workouts,
+          'heart_rate_bpm': heartRate.round(),
+        });
+      }
+
+      _cachedDailyRecords = dailyRecords;
+      _lastDailyFetchTime = DateTime.now();
+      _cachedDailyDays = days;
+      await _savePersistentCache();
+      return dailyRecords;
+    } catch (e) {
+      debugPrint("Error during full daily records fetch: $e");
+      if (_cachedDailyRecords != null) {
+        debugPrint("Returning cached daily records on full fetch error.");
+        return _cachedDailyRecords!;
+      }
+      rethrow;
+    }
   }
 
   double? _extractDoubleValue(HealthDataPoint point) {

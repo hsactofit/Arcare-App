@@ -11,6 +11,13 @@ class ProgressScreen extends StatefulWidget {
 
 class _ProgressScreenState extends State<ProgressScreen> {
   String _selectedPeriod = "Weekly";
+  late Future<List<Map<String, dynamic>>> _dailyDataFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _dailyDataFuture = HealthService.instance.fetchDailyHealthDataForPeriod(days: 7);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -93,7 +100,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
                 // Main Stats Content
                 Expanded(
                   child: FutureBuilder<List<Map<String, dynamic>>>(
-                    future: HealthService.instance.fetchDailyHealthDataForPeriod(days: 7),
+                    future: _dailyDataFuture,
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
                         return const Center(
@@ -130,96 +137,105 @@ class _ProgressScreenState extends State<ProgressScreen> {
                       final avgCalories = dailyData.isEmpty ? 0.0 : (totalCalories / dailyData.length);
                       final avgWater = dailyData.isEmpty ? 0.0 : (totalWater / dailyData.length);
 
-                      return ListView(
-                        physics: const BouncingScrollPhysics(),
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        children: [
-                          // Overview Summary Cards Grid
-                          GridView.count(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            crossAxisCount: 2,
-                            childAspectRatio: 1.4,
-                            crossAxisSpacing: 12,
-                            mainAxisSpacing: 12,
-                            children: [
-                              _buildMetricSummaryCard("🚶 Steps", "${avgSteps.round()}", "avg/day", Colors.green, isDark),
-                              _buildMetricSummaryCard("🔥 Calories", "${avgCalories.round()} kcal", "avg/day", Colors.orange, isDark),
-                              _buildMetricSummaryCard("🌙 Sleep", "${avgSleep.toStringAsFixed(1)} hrs", "avg/night", Colors.purple, isDark),
-                              _buildMetricSummaryCard("💧 Hydration", "${avgWater.round()} ml", "avg/day", Colors.blue, isDark),
-                            ],
-                          ),
-
-                          const SizedBox(height: 24),
-
-                          // Daily Logs Header
-                          Text(
-                            "Day-by-Day Logs (Last 7 Days)",
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w900,
-                              color: textColor,
+                      return RefreshIndicator(
+                        onRefresh: () async {
+                          final f = HealthService.instance.fetchDailyHealthDataForPeriod(days: 7, forceRefresh: true);
+                          setState(() {
+                            _dailyDataFuture = f;
+                          });
+                          await f;
+                        },
+                        child: ListView(
+                          physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          children: [
+                            // Overview Summary Cards Grid
+                            GridView.count(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              crossAxisCount: 2,
+                              childAspectRatio: 1.4,
+                              crossAxisSpacing: 12,
+                              mainAxisSpacing: 12,
+                              children: [
+                                _buildMetricSummaryCard("🚶 Steps", "${avgSteps.round()}", "avg/day", Colors.green, isDark),
+                                _buildMetricSummaryCard("🔥 Calories", "${avgCalories.round()} kcal", "avg/day", Colors.orange, isDark),
+                                _buildMetricSummaryCard("🌙 Sleep", "${avgSleep.toStringAsFixed(1)} hrs", "avg/night", Colors.purple, isDark),
+                                _buildMetricSummaryCard("💧 Hydration", "${avgWater.round()} ml", "avg/day", Colors.blue, isDark),
+                              ],
                             ),
-                          ),
-                          const SizedBox(height: 12),
 
-                          if (dailyData.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.all(32.0),
-                              child: Center(
-                                child: Text(
-                                  "No sync logs available yet",
-                                  style: TextStyle(color: secondaryTextColor),
-                                ),
+                            const SizedBox(height: 24),
+
+                            // Daily Logs Header
+                            Text(
+                              "Day-by-Day Logs (Last 7 Days)",
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: textColor,
                               ),
-                            )
-                          else
-                            ...dailyData.map((day) {
-                              final String dateStr = day['date'] as String;
-                              final steps = day['steps'] as int;
-                              final calories = day['calories'] as int;
-                              final double sleep = (day['sleep_duration_hours'] as num).toDouble();
-                              final water = day['water_intake_ml'] as int;
+                            ),
+                            const SizedBox(height: 12),
 
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: GlassCard(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(
-                                            _formatDate(dateStr),
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 14,
-                                              color: textColor,
-                                            ),
-                                          ),
-                                          const Icon(Icons.check_circle_outline, color: Colors.green, size: 16),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          _buildLogMetric("🚶 $steps", "steps"),
-                                          _buildLogMetric("🔥 $calories", "kcal"),
-                                          _buildLogMetric("🌙 ${sleep.toStringAsFixed(1)}h", "sleep"),
-                                          _buildLogMetric("💧 ${water}ml", "water"),
-                                        ],
-                                      ),
-                                    ],
+                            if (dailyData.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.all(32.0),
+                                child: Center(
+                                  child: Text(
+                                    "No sync logs available yet",
+                                    style: TextStyle(color: secondaryTextColor),
                                   ),
                                 ),
-                              );
-                            }).toList(),
+                              )
+                            else
+                              ...dailyData.map((day) {
+                                final String dateStr = day['date'] as String;
+                                final steps = day['steps'] as int;
+                                final calories = day['calories'] as int;
+                                final double sleep = (day['sleep_duration_hours'] as num).toDouble();
+                                final water = day['water_intake_ml'] as int;
 
-                          const SizedBox(height: 80), // Padding to clear bottom navigation bar
-                        ],
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: GlassCard(
+                                    padding: const EdgeInsets.all(16),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Text(
+                                              _formatDate(dateStr),
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                                color: textColor,
+                                              ),
+                                            ),
+                                            const Icon(Icons.check_circle_outline, color: Colors.green, size: 16),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            _buildLogMetric("🚶 $steps", "steps"),
+                                            _buildLogMetric("🔥 $calories", "kcal"),
+                                            _buildLogMetric("🌙 ${sleep.toStringAsFixed(1)}h", "sleep"),
+                                            _buildLogMetric("💧 ${water}ml", "water"),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+
+                            const SizedBox(height: 80), // Padding to clear bottom navigation bar
+                          ],
+                        ),
                       );
                     },
                   ),

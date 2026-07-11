@@ -129,6 +129,11 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
       }
 
       if (response.statusCode == 200) {
+        // Debug log the graph API response
+        debugPrint("================ WATER GRAPH API RESPONSE ================");
+        debugPrint("Response Body: ${response.body}");
+        debugPrint("==========================================================");
+
         final Map<String, dynamic> resData = jsonDecode(response.body);
         final List<dynamic> dataList = resData['data'] ?? [];
         setState(() {
@@ -320,6 +325,12 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
                 }),
               );
             }
+
+            // Debug log the logged water API response
+            debugPrint("================ SYNC MANUAL WATER API RESPONSE ================");
+            debugPrint("Status Code: ${response.statusCode}");
+            debugPrint("Response Body: ${response.body}");
+            debugPrint("=================================================================");
           }
         }
       } catch (e) {
@@ -371,6 +382,12 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
           headers: {if (newToken != null) 'Authorization': 'Bearer $newToken'},
         );
       }
+
+      // Debug log the delete water log API response
+      debugPrint("================ DELETE WATER LOG API RESPONSE ================");
+      debugPrint("Status Code: ${response.statusCode}");
+      debugPrint("Response Body: ${response.body}");
+      debugPrint("===============================================================");
 
       if (response.statusCode == 200) {
         // Adjust local pref data
@@ -484,6 +501,12 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
           }),
         );
       }
+
+      // Debug log the update water log API response
+      debugPrint("================ UPDATE WATER LOG API RESPONSE ================");
+      debugPrint("Status Code: ${response.statusCode}");
+      debugPrint("Response Body: ${response.body}");
+      debugPrint("===============================================================");
 
       if (response.statusCode == 200) {
         final delta = (newAmount - log.amount).toDouble();
