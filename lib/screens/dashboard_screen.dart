@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:health/health.dart';
@@ -17,6 +18,8 @@ import '../services/auth_service.dart';
 import 'onboarding_screen.dart';
 import 'water_logging_screen.dart';
 import 'metric_detail_screen.dart';
+import 'gym_checkin_screen.dart';
+import 'challenges_screen.dart';
 import '../widgets/water/wave_painter.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -62,11 +65,30 @@ class DashboardScreenState extends State<DashboardScreen>
   int? _mindfulnessSubscore;
   Future<List<Map<String, dynamic>>>? _dailyRecordsFuture;
 
+  // Gym Check-in tracking fields
+  bool _gymCheckedIn = false;
+  String? _gymName;
+  String? _gymPlace;
+  DateTime? _gymCheckInTime;
+  Timer? _gymTimer;
+  Duration _gymElapsed = Duration.zero;
+  bool _gymDoneToday = false;
+
+  // User email & active challenges
+  String _userEmail = "";
+  List<Challenge> _activeChallenges = [];
+
+  ScrollController? _activeGoalsScrollController;
+  Timer? _activeGoalsScrollTimer;
+
   @override
   void initState() {
     super.initState();
     _loadSetupState();
-    _dailyRecordsFuture = HealthService.instance.fetchDailyHealthDataForPeriod(days: 7);
+    _loadGymState();
+    _dailyRecordsFuture = HealthService.instance.fetchDailyHealthDataForPeriod(
+      days: 7,
+    );
     _checkStatusAndSync();
 
     _waterWaveController = AnimationController(
@@ -89,6 +111,9 @@ class DashboardScreenState extends State<DashboardScreen>
 
   @override
   void dispose() {
+    _gymTimer?.cancel();
+    _activeGoalsScrollTimer?.cancel();
+    _activeGoalsScrollController?.dispose();
     _waterWaveController.removeListener(_updateWaterBubbles);
     _waterWaveController.dispose();
     super.dispose();
@@ -100,7 +125,8 @@ class DashboardScreenState extends State<DashboardScreen>
     setState(() {
       for (var bubble in _waterBubbles) {
         bubble.y -= bubble.speed;
-        bubble.x += sin(_waterWaveController.value * 2 * pi + bubble.y * 10) * 0.002;
+        bubble.x +=
+            sin(_waterWaveController.value * 2 * pi + bubble.y * 10) * 0.002;
 
         final double waterTopY = 1.0 - progress;
         if (bubble.y < waterTopY || bubble.x < 0 || bubble.x > 1) {
@@ -109,6 +135,178 @@ class DashboardScreenState extends State<DashboardScreen>
         }
       }
     });
+  }
+
+  Future<void> _loadGymState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final isCheckedIn = prefs.getBool('gym_checked_in') ?? false;
+    final todayStr = DateTime.now().toIso8601String().substring(0, 10);
+    final gymDoneTodayDate = prefs.getString('gym_done_today_date');
+    final gymDoneToday = gymDoneTodayDate == todayStr;
+
+    setState(() {
+      _gymCheckedIn = isCheckedIn;
+      _gymDoneToday = gymDoneToday;
+      if (isCheckedIn) {
+        _gymName = prefs.getString('gym_name');
+        _gymPlace = prefs.getString('gym_place');
+        final timeStr = prefs.getString('gym_check_in_time');
+        _gymCheckInTime = timeStr != null ? DateTime.tryParse(timeStr) : null;
+      } else {
+        _gymName = null;
+        _gymPlace = null;
+        _gymCheckInTime = null;
+        _gymElapsed = Duration.zero;
+      }
+    });
+
+    if (isCheckedIn) {
+      _startGymTimer();
+    } else {
+      _gymTimer?.cancel();
+    }
+    _updateAutoScrollState();
+  }
+
+  void _startGymTimer() {
+    _gymTimer?.cancel();
+    if (_gymCheckInTime == null) return;
+    _gymTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      setState(() {
+        _gymElapsed = DateTime.now().difference(_gymCheckInTime!);
+      });
+    });
+  }
+
+  String _formatDuration(Duration d) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final hours = twoDigits(d.inHours);
+    final minutes = twoDigits(d.inMinutes.remainder(60));
+    final seconds = twoDigits(d.inSeconds.remainder(60));
+    return "$hours:$minutes:$seconds";
+  }
+
+  String _getTimeBasedGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour >= 5 && hour < 12) {
+      return "Good Morning";
+    } else if (hour >= 12 && hour < 17) {
+      return "Good Afternoon";
+    } else {
+      return "Good Evening";
+    }
+  }
+
+  void _updateAutoScrollState() {
+    if (!mounted) return;
+
+    final hasActiveGymChallenge = _activeChallenges.any(
+      (c) =>
+          c.metricType == 'workouts' ||
+          c.title.toLowerCase().contains('gym') ||
+          c.title.toLowerCase().contains('workout'),
+    );
+
+    final isGymCompletedToday = _activeChallenges.any(
+      (c) =>
+          (c.metricType == 'workouts' ||
+              c.title.toLowerCase().contains('gym') ||
+              c.title.toLowerCase().contains('workout')) &&
+          c.completedToday,
+    );
+
+    bool showGymCheckinCard = false;
+    if (_gymCheckedIn) {
+      showGymCheckinCard = true;
+    } else if (!isGymCompletedToday && hasActiveGymChallenge) {
+      showGymCheckinCard = true;
+    }
+
+    final otherChallengesCount = _activeChallenges.where((c) {
+      final isGym =
+          c.metricType == 'workouts' ||
+          c.title.toLowerCase().contains('gym') ||
+          c.title.toLowerCase().contains('workout');
+      if (isGym && isGymCompletedToday) {
+        return false;
+      }
+      return true;
+    }).length;
+
+    final totalItems = (showGymCheckinCard ? 1 : 0) + otherChallengesCount;
+    _startActiveGoalsAutoScroll(totalItems);
+  }
+
+  void _startActiveGoalsAutoScroll(int itemCount) {
+    _activeGoalsScrollTimer?.cancel();
+    if (itemCount <= 1) {
+      _activeGoalsScrollController?.dispose();
+      _activeGoalsScrollController = null;
+      return;
+    }
+
+    _activeGoalsScrollController ??= ScrollController();
+
+    _activeGoalsScrollTimer = Timer.periodic(const Duration(seconds: 4), (
+      timer,
+    ) {
+      if (!mounted ||
+          _activeGoalsScrollController == null ||
+          !_activeGoalsScrollController!.hasClients) {
+        return;
+      }
+
+      final maxScroll = _activeGoalsScrollController!.position.maxScrollExtent;
+      final currentScroll = _activeGoalsScrollController!.position.pixels;
+
+      if (maxScroll <= 0) return;
+
+      double targetScroll =
+          currentScroll +
+          182.0; // scroll by roughly one card width (170 card width + 12 spacing)
+      if (currentScroll >= maxScroll - 5.0) {
+        targetScroll = 0.0; // jump back to start
+      }
+
+      _activeGoalsScrollController!.animateTo(
+        targetScroll,
+        duration: const Duration(milliseconds: 1200),
+        curve: Curves.easeInOut,
+      );
+    });
+  }
+
+  Future<void> _fetchActiveChallenges() async {
+    try {
+      final token = await AuthService.instance.getAccessToken();
+      final url = '${AuthService.apiBaseUrl}/api/challenges';
+
+      var response = await http.get(
+        Uri.parse(url),
+        headers: {if (token != null) 'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 401) {
+        await AuthService.instance.refreshSessionToken();
+        final newToken = await AuthService.instance.getAccessToken();
+        response = await http.get(
+          Uri.parse(url),
+          headers: {if (newToken != null) 'Authorization': 'Bearer $newToken'},
+        );
+      }
+
+      if (response.statusCode == 200) {
+        final List<dynamic> list = jsonDecode(response.body);
+        final parsed = list.map((item) => Challenge.fromJson(item)).toList();
+        setState(() {
+          _activeChallenges = parsed.where((c) => c.isJoined).toList();
+        });
+        _updateAutoScrollState();
+      }
+    } catch (e) {
+      debugPrint("Error fetching active challenges for dashboard: $e");
+    }
   }
 
   Future<void> _loadSetupState() async {
@@ -156,6 +354,8 @@ class DashboardScreenState extends State<DashboardScreen>
   void refreshData() {
     if (mounted) {
       _checkStatusAndSync();
+      _fetchActiveChallenges();
+      _loadGymState();
     }
   }
 
@@ -395,7 +595,8 @@ class DashboardScreenState extends State<DashboardScreen>
   Future<void> _fetchRealData({bool forceSync = false}) async {
     setState(() {
       _isSyncing = true;
-      _dailyRecordsFuture = HealthService.instance.fetchDailyHealthDataForPeriod(days: 7, forceRefresh: forceSync);
+      _dailyRecordsFuture = HealthService.instance
+          .fetchDailyHealthDataForPeriod(days: 7, forceRefresh: forceSync);
     });
     try {
       // 1. Always load the active local Health Connect data to update the UI cards
@@ -435,7 +636,15 @@ class DashboardScreenState extends State<DashboardScreen>
             }
           }
         }
+        final jsonStr = prefs.getString('onboarding_data');
+        if (jsonStr != null) {
+          final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
+          _userEmail = onboarding['auth']?['email'] ?? "";
+        }
       });
+
+      await _fetchActiveChallenges();
+      await _loadGymState();
 
       // 3. Determine if we should perform a backend synchronization
       bool shouldSync = forceSync;
@@ -1142,7 +1351,7 @@ class DashboardScreenState extends State<DashboardScreen>
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  "Hey, $_userName 👋",
+                  "${_getTimeBasedGreeting()}",
                   style: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w900,
                     letterSpacing: -0.6,
@@ -1394,7 +1603,10 @@ class DashboardScreenState extends State<DashboardScreen>
                   bottomLeft: Radius.circular(16),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                   child: Row(
                     children: [
                       Container(
@@ -2258,10 +2470,14 @@ class DashboardScreenState extends State<DashboardScreen>
                   child: Container(
                     height: 100,
                     decoration: BoxDecoration(
-                      color: isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.02),
+                      color: isDark
+                          ? Colors.white.withOpacity(0.02)
+                          : Colors.black.withOpacity(0.02),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06),
+                        color: isDark
+                            ? Colors.white.withOpacity(0.08)
+                            : Colors.black.withOpacity(0.06),
                         width: 1.5,
                       ),
                     ),
@@ -2274,7 +2490,8 @@ class DashboardScreenState extends State<DashboardScreen>
                               return CustomPaint(
                                 painter: WavePainter(
                                   progress: progress,
-                                  wavePhase: _waterWaveController.value * 2 * pi,
+                                  wavePhase:
+                                      _waterWaveController.value * 2 * pi,
                                   bubbles: _waterBubbles,
                                   isDark: isDark,
                                 ),
@@ -2287,7 +2504,9 @@ class DashboardScreenState extends State<DashboardScreen>
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
                                 colors: [
-                                  Colors.black.withOpacity(isDark ? 0.35 : 0.05),
+                                  Colors.black.withOpacity(
+                                    isDark ? 0.35 : 0.05,
+                                  ),
                                   Colors.black.withOpacity(isDark ? 0.1 : 0.0),
                                 ],
                                 begin: Alignment.bottomCenter,
@@ -2306,7 +2525,11 @@ class DashboardScreenState extends State<DashboardScreen>
                                         color: Colors.white,
                                         size: 20,
                                         shadows: [
-                                          Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 1)),
+                                          Shadow(
+                                            color: Colors.black38,
+                                            blurRadius: 4,
+                                            offset: Offset(0, 1),
+                                          ),
                                         ],
                                       ),
                                       const SizedBox(width: 6),
@@ -2317,7 +2540,11 @@ class DashboardScreenState extends State<DashboardScreen>
                                           fontWeight: FontWeight.w900,
                                           fontSize: 15,
                                           shadows: [
-                                            Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 1)),
+                                            Shadow(
+                                              color: Colors.black38,
+                                              blurRadius: 4,
+                                              offset: Offset(0, 1),
+                                            ),
                                           ],
                                         ),
                                       ),
@@ -2331,7 +2558,11 @@ class DashboardScreenState extends State<DashboardScreen>
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold,
                                       shadows: [
-                                        Shadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 1)),
+                                        Shadow(
+                                          color: Colors.black38,
+                                          blurRadius: 4,
+                                          offset: Offset(0, 1),
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -2641,7 +2872,7 @@ class DashboardScreenState extends State<DashboardScreen>
       context,
       MaterialPageRoute(
         builder: (context) => MetricDetailScreen(
-          metric: metric,
+          metric: metric.toLowerCase() == 'fitness' ? 'workouts' : metric,
           title: title,
           icon: icon,
           color: color,
@@ -2653,7 +2884,12 @@ class DashboardScreenState extends State<DashboardScreen>
     });
   }
 
-  Widget _buildStepsCard(bool isDark, double steps, double goal, VoidCallback onTap) {
+  Widget _buildStepsCard(
+    bool isDark,
+    double steps,
+    double goal,
+    VoidCallback onTap,
+  ) {
     final gradient = isDark
         ? const LinearGradient(
             colors: [Color(0xFF132320), Color(0xFF0E1A18)],
@@ -2705,7 +2941,9 @@ class DashboardScreenState extends State<DashboardScreen>
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w900,
-                        color: isDark ? const Color(0xFF38E5A6) : const Color(0xFF4C8D80),
+                        color: isDark
+                            ? const Color(0xFF38E5A6)
+                            : const Color(0xFF4C8D80),
                         letterSpacing: 0.5,
                       ),
                     ),
@@ -2728,8 +2966,12 @@ class DashboardScreenState extends State<DashboardScreen>
                         child: LinearProgressIndicator(
                           value: progress,
                           minHeight: 7,
-                          backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.04),
-                          valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF006D56)),
+                          backgroundColor: isDark
+                              ? Colors.white10
+                              : Colors.black.withOpacity(0.04),
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                            Color(0xFF006D56),
+                          ),
                         ),
                       ),
                     ),
@@ -2759,7 +3001,12 @@ class DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _buildHeartRateCard(bool isDark, double bpm, double restingBpm, VoidCallback onTap) {
+  Widget _buildHeartRateCard(
+    bool isDark,
+    double bpm,
+    double restingBpm,
+    VoidCallback onTap,
+  ) {
     final gradient = isDark
         ? const LinearGradient(
             colors: [Color(0xFF2D1418), Color(0xFF1E0C0E)],
@@ -2841,12 +3088,19 @@ class DashboardScreenState extends State<DashboardScreen>
                     bottom: -2,
                     child: Center(
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 11,
+                          vertical: 5,
+                        ),
                         decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1D1D23) : Colors.white,
+                          color: isDark
+                              ? const Color(0xFF1D1D23)
+                              : Colors.white,
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: isDark ? Colors.white12 : const Color(0xFFF5CCD2),
+                            color: isDark
+                                ? Colors.white12
+                                : const Color(0xFFF5CCD2),
                             width: 1.0,
                           ),
                           boxShadow: [
@@ -2878,7 +3132,12 @@ class DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _buildCaloriesCard(bool isDark, double calories, double goal, VoidCallback onTap) {
+  Widget _buildCaloriesCard(
+    bool isDark,
+    double calories,
+    double goal,
+    VoidCallback onTap,
+  ) {
     final gradient = isDark
         ? const LinearGradient(
             colors: [Color(0xFF281B10), Color(0xFF1B1109)],
@@ -2929,7 +3188,9 @@ class DashboardScreenState extends State<DashboardScreen>
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w900,
-                        color: isDark ? const Color(0xFFFFB03A) : Colors.grey[700],
+                        color: isDark
+                            ? const Color(0xFFFFB03A)
+                            : Colors.grey[700],
                       ),
                     ),
                   ],
@@ -2973,7 +3234,12 @@ class DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _buildSleepCard(bool isDark, double sleepHours, double goal, VoidCallback onTap) {
+  Widget _buildSleepCard(
+    bool isDark,
+    double sleepHours,
+    double goal,
+    VoidCallback onTap,
+  ) {
     final gradient = isDark
         ? const LinearGradient(
             colors: [Color(0xFF181628), Color(0xFF100F1B)],
@@ -3065,31 +3331,31 @@ class DashboardScreenState extends State<DashboardScreen>
                           color: isDark ? Colors.white30 : Colors.black45,
                         ),
                       ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Center(
-                child: Container(
-                  width: 54,
-                  height: 54,
-                  padding: const EdgeInsets.all(3),
-                  child: CustomPaint(
-                    painter: SleepRingPainter(
-                      progress: progress,
-                      color: const Color(0xFF5A5AE6),
-                      strokeWidth: 5.0,
+                const SizedBox(width: 8),
+                Center(
+                  child: Container(
+                    width: 54,
+                    height: 54,
+                    padding: const EdgeInsets.all(3),
+                    child: CustomPaint(
+                      painter: SleepRingPainter(
+                        progress: progress,
+                        color: const Color(0xFF5A5AE6),
+                        strokeWidth: 5.0,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3170,155 +3436,169 @@ class DashboardScreenState extends State<DashboardScreen>
                 physics: const AlwaysScrollableScrollPhysics(
                   parent: BouncingScrollPhysics(),
                 ),
-              slivers: [
-                // Header (Greeting, Profile, Notification Icon)
-                _buildHeader(theme, isDark),
+                slivers: [
+                  // Header (Greeting, Profile, Notification Icon)
+                  _buildHeader(theme, isDark),
 
-                // Health Connect status banner at the top
-                if (!_isConnected)
+                  // Active challenges actions row
                   SliverToBoxAdapter(
-                    child: _healthConnectRequested
-                        ? _buildState2Banner(theme, isDark)
-                        : _buildState1Banner(theme, isDark),
+                    child: _buildActiveChallengesRow(theme, isDark),
                   ),
 
-                // Guide/Setup status card when connected but no data
-                if (_isConnected && !_hasHealthData)
-                  if (!_healthSetupCompleted)
+                  // Health Connect status banner at the top
+                  if (!_isConnected)
                     SliverToBoxAdapter(
-                      child: _buildState3SubModeA(theme, isDark),
-                    )
-                  else
-                    SliverToBoxAdapter(
-                      child: _buildState3SubModeB(theme, isDark),
+                      child: _healthConnectRequested
+                          ? _buildState2Banner(theme, isDark)
+                          : _buildState1Banner(theme, isDark),
                     ),
 
-                // Main Wellness & Score Card
-                SliverToBoxAdapter(
-                  child: _buildWellnessScoreCard(theme, isDark),
-                ),
+                  // Guide/Setup status card when connected but no data
+                  if (_isConnected && !_hasHealthData)
+                    if (!_healthSetupCompleted)
+                      SliverToBoxAdapter(
+                        child: _buildState3SubModeA(theme, isDark),
+                      )
+                    else
+                      SliverToBoxAdapter(
+                        child: _buildState3SubModeB(theme, isDark),
+                      ),
 
-                // Face Scan Banner
-                SliverToBoxAdapter(child: _buildFaceScanBanner(theme, isDark)),
+                  // Main Wellness & Score Card
+                  SliverToBoxAdapter(
+                    child: _buildWellnessScoreCard(theme, isDark),
+                  ),
 
-                // Asymmetric Staggered Width Rows: Row 1 (Steps wide + HR circle), Row 2 (Calories + Sleep wide)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 12),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Row 1: Steps (wide) & Heart Rate (narrow/circle)
-                        Row(
-                          children: [
-                            Expanded(
-                              flex: 3,
-                              child: _buildStepsCard(
-                                isDark,
-                                _healthData.steps,
-                                _stepGoal,
-                                () => _navigateToMetricDetail(
-                                  'steps',
-                                  'Steps',
-                                  '👣',
-                                  const Color(0xFF006D56),
+                  // Face Scan Banner
+                  SliverToBoxAdapter(
+                    child: _buildFaceScanBanner(theme, isDark),
+                  ),
+
+                  // Asymmetric Staggered Width Rows: Row 1 (Steps wide + HR circle), Row 2 (Calories + Sleep wide)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(
+                        left: 16,
+                        right: 16,
+                        top: 12,
+                        bottom: 12,
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Row 1: Steps (wide) & Heart Rate (narrow/circle)
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: _buildStepsCard(
+                                  isDark,
+                                  _healthData.steps,
+                                  _stepGoal,
+                                  () => _navigateToMetricDetail(
+                                    'steps',
+                                    'Steps',
+                                    '👣',
+                                    const Color(0xFF006D56),
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              flex: 2,
-                              child: _buildHeartRateCard(
-                                isDark,
-                                _healthData.heartRate,
-                                _healthData.restingHeartRate > 0 ? _healthData.restingHeartRate : 64.0,
-                                () => _navigateToMetricDetail(
-                                  'heart_rate',
-                                  'Heart Rate',
-                                  '❤️',
-                                  const Color(0xFFC72C3A),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                flex: 2,
+                                child: _buildHeartRateCard(
+                                  isDark,
+                                  _healthData.heartRate,
+                                  _healthData.restingHeartRate > 0
+                                      ? _healthData.restingHeartRate
+                                      : 64.0,
+                                  () => _navigateToMetricDetail(
+                                    'heart_rate',
+                                    'Heart Rate',
+                                    '❤️',
+                                    const Color(0xFFC72C3A),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        // Row 2: Calories (narrow) & Sleep (wide)
-                        Row(
-                          children: [
-                            Expanded(
-                              flex: 2,
-                              child: _buildCaloriesCard(
-                                isDark,
-                                _healthData.activeCalories,
-                                _calorieGoal,
-                                () => _navigateToMetricDetail(
-                                  'calories',
-                                  'Calories',
-                                  '🔥',
-                                  const Color(0xFFE08200),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          // Row 2: Calories (narrow) & Sleep (wide)
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: _buildCaloriesCard(
+                                  isDark,
+                                  _healthData.activeCalories,
+                                  _calorieGoal,
+                                  () => _navigateToMetricDetail(
+                                    'calories',
+                                    'Calories',
+                                    '🔥',
+                                    const Color(0xFFE08200),
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              flex: 3,
-                              child: _buildSleepCard(
-                                isDark,
-                                _healthData.sleepDuration,
-                                _sleepGoal,
-                                () => _navigateToMetricDetail(
-                                  'sleep',
-                                  'Sleep',
-                                  '🌙',
-                                  const Color(0xFF5A5AE6),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                flex: 3,
+                                child: _buildSleepCard(
+                                  isDark,
+                                  _healthData.sleepDuration,
+                                  _sleepGoal,
+                                  () => _navigateToMetricDetail(
+                                    'sleep',
+                                    'Sleep',
+                                    '🌙',
+                                    const Color(0xFF5A5AE6),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
 
-                // Water Intake Section
-                _buildWaterIntakeSliver(theme, isDark),
+                  // Water Intake Section
+                  _buildWaterIntakeSliver(theme, isDark),
 
-                // Nutrition Section
-                _buildNutritionSliver(theme, isDark),
+                  // Nutrition Section
+                  _buildNutritionSliver(theme, isDark),
 
-                // AI Health Buddy Card
-                SliverToBoxAdapter(
-                  child: _buildAIRecommendationCard(theme, isDark),
-                ),
+                  // AI Health Buddy Card
+                  SliverToBoxAdapter(
+                    child: _buildAIRecommendationCard(theme, isDark),
+                  ),
 
-                // Today's Plan Section
-                SliverToBoxAdapter(
-                  child: _buildTodaysPlanSection(theme, isDark),
-                ),
+                  // Today's Plan Section
+                  SliverToBoxAdapter(
+                    child: _buildTodaysPlanSection(theme, isDark),
+                  ),
 
-                // Quick Access Section
-                SliverToBoxAdapter(
-                  child: _buildQuickAccessSection(theme, isDark),
-                ),
+                  // Quick Access Section
+                  SliverToBoxAdapter(
+                    child: _buildQuickAccessSection(theme, isDark),
+                  ),
 
-                // Active Challenge Card
-                SliverToBoxAdapter(
-                  child: _buildActiveChallengeCard(theme, isDark),
-                ),
+                  // Active Challenge Card
+                  SliverToBoxAdapter(
+                    child: _buildActiveChallengeCard(theme, isDark),
+                  ),
 
-                // Your Last 12 Days Graph
-                SliverToBoxAdapter(
-                  child: _buildLastDaysActivityBarGraph(theme, isDark),
-                ),
+                  // Your Last 12 Days Graph
+                  SliverToBoxAdapter(
+                    child: _buildLastDaysActivityBarGraph(theme, isDark),
+                  ),
 
-                // Bottom padding
-                const SliverToBoxAdapter(child: SizedBox(height: 110)),
-              ],
+                  // Bottom padding
+                  const SliverToBoxAdapter(child: SizedBox(height: 110)),
+                ],
+              ),
             ),
           ),
-        ),
           if (_isSyncing)
             Positioned(
               top: 0,
@@ -3993,6 +4273,408 @@ class DashboardScreenState extends State<DashboardScreen>
       ),
     );
   }
+
+  Widget _buildActiveChallengesRow(ThemeData theme, bool isDark) {
+    final textColor = isDark ? Colors.white : Colors.black87;
+
+    // Determine if gym check-in card should be shown
+    bool showGymCheckinCard = false;
+    final hasActiveGymChallenge = _activeChallenges.any(
+      (c) =>
+          c.metricType == 'workouts' ||
+          c.title.toLowerCase().contains('gym') ||
+          c.title.toLowerCase().contains('workout'),
+    );
+
+    final isGymCompletedToday = _activeChallenges.any(
+      (c) =>
+          (c.metricType == 'workouts' ||
+              c.title.toLowerCase().contains('gym') ||
+              c.title.toLowerCase().contains('workout')) &&
+          c.completedToday,
+    );
+
+    if (_gymCheckedIn) {
+      showGymCheckinCard = true;
+    } else if (!isGymCompletedToday && hasActiveGymChallenge) {
+      showGymCheckinCard = true;
+    }
+
+    // Filter other active challenges (if gym check-in & out is done today, don't show gym/workouts challenges in active goals)
+    final otherChallenges = _activeChallenges.where((c) {
+      final isGym =
+          c.metricType == 'workouts' ||
+          c.title.toLowerCase().contains('gym') ||
+          c.title.toLowerCase().contains('workout');
+      if (isGym && isGymCompletedToday) {
+        return false;
+      }
+      return true;
+    }).toList();
+
+    final totalItems = (showGymCheckinCard ? 1 : 0) + otherChallenges.length;
+    final isSingleItem = totalItems == 1;
+
+    // If nothing to show, return shrink
+    if (totalItems == 0) {
+      return const SizedBox.shrink();
+    }
+
+    if (isSingleItem) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildActiveGoalsHeader(theme, textColor),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SizedBox(
+              width: double.infinity,
+              height: 72,
+              child: showGymCheckinCard
+                  ? _buildGymCheckinDashboardCard(isDark, isSingleItem: true)
+                  : _buildChallengeDashboardCard(
+                      otherChallenges.first,
+                      isDark,
+                      isSingleItem: true,
+                    ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildActiveGoalsHeader(theme, textColor),
+        SizedBox(
+          height: 72,
+          child: ListView(
+            controller: _activeGoalsScrollController,
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            children: [
+              if (showGymCheckinCard)
+                _buildGymCheckinDashboardCard(isDark, isSingleItem: false),
+              ...otherChallenges.map(
+                (c) => _buildChallengeDashboardCard(
+                  c,
+                  isDark,
+                  isSingleItem: false,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActiveGoalsHeader(ThemeData theme, Color textColor) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, right: 16, top: 14, bottom: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            "ACTIVE GOALS",
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w900,
+              color: textColor.withOpacity(0.6),
+              letterSpacing: 1.2,
+            ),
+          ),
+          Container(
+            width: 6,
+            height: 6,
+            decoration: const BoxDecoration(
+              color: Colors.greenAccent,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGymCheckinDashboardCard(
+    bool isDark, {
+    bool isSingleItem = false,
+  }) {
+    final textColor = isDark ? Colors.white : Colors.black87;
+
+    // Indigo-to-blue glassmorphic capsule design
+    final cardBg = isDark
+        ? Colors.indigoAccent.withOpacity(0.12)
+        : Colors.indigoAccent.withOpacity(0.06);
+    final borderColor = Colors.indigoAccent.withOpacity(0.35);
+
+    return Container(
+      width: isSingleItem ? double.infinity : 210,
+      margin: isSingleItem
+          ? const EdgeInsets.symmetric(vertical: 4)
+          : const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor, width: 1.2),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => GymCheckinScreen(
+                  onStatusChanged: () {
+                    _loadGymState();
+                    _fetchActiveChallenges();
+                  },
+                ),
+              ),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                // Pulsing indicator / badge
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Colors.indigoAccent.withOpacity(0.15),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.indigoAccent.withOpacity(0.3),
+                      width: 1.0,
+                    ),
+                  ),
+                  child: Center(
+                    child: _gymCheckedIn
+                        ? const Text("🏋️‍♂️", style: TextStyle(fontSize: 16))
+                        : const Icon(
+                            Icons.qr_code_scanner_rounded,
+                            color: Colors.indigoAccent,
+                            size: 18,
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            _gymCheckedIn ? "GYM ACTIVE" : "GYM CHECK-IN",
+                            style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.indigoAccent,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          if (_gymCheckedIn) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: const BoxDecoration(
+                                color: Colors.redAccent,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _gymCheckedIn
+                            ? (_gymName ?? "Workout")
+                            : "Check in now",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: textColor,
+                        ),
+                      ),
+                      if (_gymCheckedIn) ...[
+                        const SizedBox(height: 1),
+                        Text(
+                          _formatDuration(_gymElapsed),
+                          style: const TextStyle(
+                            fontSize: 9,
+                            fontFamily: 'monospace',
+                            color: Colors.indigoAccent,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChallengeDashboardCard(
+    Challenge challenge,
+    bool isDark, {
+    bool isSingleItem = false,
+  }) {
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final color = challenge.color;
+    final cardBg = isDark ? color.withOpacity(0.08) : color.withOpacity(0.04);
+    final borderColor = color.withOpacity(0.25);
+
+    // Determine category icon
+    String emoji = "🏆";
+    if (challenge.metricType == 'steps')
+      emoji = "👣";
+    else if (challenge.metricType == 'water')
+      emoji = "🥤";
+    else if (challenge.metricType == 'sleep')
+      emoji = "🌙";
+    else if (challenge.metricType == 'calories')
+      emoji = "🔥";
+    else if (challenge.metricType == 'heart_rate')
+      emoji = "❤️";
+    else if (challenge.metricType == 'workouts' ||
+        challenge.title.toLowerCase().contains('gym') ||
+        challenge.title.toLowerCase().contains('workout'))
+      emoji = "🏋️‍♂️";
+
+    final progressVal = (challenge.progress / challenge.target).clamp(0.0, 1.0);
+    final pct = (progressVal * 100).round();
+
+    return Container(
+      width: isSingleItem ? double.infinity : 170,
+      margin: isSingleItem
+          ? const EdgeInsets.symmetric(vertical: 4)
+          : const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor, width: 1.2),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () {
+            if (challenge.metricType == 'water') {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => WaterLoggingScreen(
+                    onWaterLogged: () {
+                      _fetchRealData(forceSync: true);
+                    },
+                  ),
+                ),
+              );
+            } else if (challenge.metricType == 'workouts' ||
+                challenge.title.toLowerCase().contains('gym') ||
+                challenge.title.toLowerCase().contains('workout')) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => GymCheckinScreen(
+                    onStatusChanged: () {
+                      _loadGymState();
+                      _fetchActiveChallenges();
+                    },
+                  ),
+                ),
+              );
+            } else {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => MetricDetailScreen(
+                    metric: challenge.metricType.toLowerCase() == 'fitness'
+                        ? 'workouts'
+                        : challenge.metricType,
+                    title: challenge.title,
+                    icon: emoji,
+                    color: color,
+                    email: _userEmail,
+                  ),
+                ),
+              );
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                // Thin circular progress ring wrapping the emoji
+                SizedBox(
+                  width: 38,
+                  height: 38,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      CircularProgressIndicator(
+                        value: progressVal,
+                        strokeWidth: 2.8,
+                        backgroundColor: isDark
+                            ? Colors.white10
+                            : Colors.black.withOpacity(0.04),
+                        valueColor: AlwaysStoppedAnimation<Color>(color),
+                      ),
+                      Text(emoji, style: const TextStyle(fontSize: 14)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        challenge.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        "$pct% done",
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: color,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class GoogleFitSetupGuideScreen extends StatelessWidget {
@@ -4034,7 +4716,10 @@ class GoogleFitSetupGuideScreen extends StatelessWidget {
                               ? Colors.white.withOpacity(0.06)
                               : Colors.black.withOpacity(0.04),
                         ),
-                        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
+                        icon: const Icon(
+                          Icons.arrow_back_ios_new_rounded,
+                          size: 16,
+                        ),
                         color: isDark ? Colors.white70 : Colors.black87,
                         onPressed: () => Navigator.pop(context),
                       ),
@@ -4109,11 +4794,23 @@ class GoogleFitSetupGuideScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        _buildProgressItem(true, "Health Connect Installed", isDark),
-                        _buildProgressItem(true, "Connected Successfully", isDark),
+                        _buildProgressItem(
+                          true,
+                          "Health Connect Installed",
+                          isDark,
+                        ),
+                        _buildProgressItem(
+                          true,
+                          "Connected Successfully",
+                          isDark,
+                        ),
                         _buildProgressItem(true, "Permissions Granted", isDark),
                         _buildProgressItem(false, "Fitness App Synced", isDark),
-                        _buildProgressItem(false, "Health Data Available", isDark),
+                        _buildProgressItem(
+                          false,
+                          "Health Data Available",
+                          isDark,
+                        ),
                       ],
                     ),
                   ),
@@ -4125,7 +4822,10 @@ class GoogleFitSetupGuideScreen extends StatelessWidget {
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.help_outline, color: Colors.blueAccent),
+                            const Icon(
+                              Icons.help_outline,
+                              color: Colors.blueAccent,
+                            ),
                             const SizedBox(width: 8),
                             Text(
                               "Google Fit Sync Steps",
@@ -4137,13 +4837,37 @@ class GoogleFitSetupGuideScreen extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 16),
-                        _buildGuideStep("1", "Open Google Fit app on your device", isDark),
+                        _buildGuideStep(
+                          "1",
+                          "Open Google Fit app on your device",
+                          isDark,
+                        ),
                         _buildGuideStep("2", "Go to your Profile tab", isDark),
-                        _buildGuideStep("3", "Open Settings (Gear Icon)", isDark),
-                        _buildGuideStep("4", "Enable Health Connect Sync option", isDark),
-                        _buildGuideStep("5", "Grant all Read & Write Permissions requested", isDark),
-                        _buildGuideStep("6", "Walk for a few minutes or wait for the data to sync", isDark),
-                        _buildGuideStep("7", "Return to Arcare App and refresh", isDark),
+                        _buildGuideStep(
+                          "3",
+                          "Open Settings (Gear Icon)",
+                          isDark,
+                        ),
+                        _buildGuideStep(
+                          "4",
+                          "Enable Health Connect Sync option",
+                          isDark,
+                        ),
+                        _buildGuideStep(
+                          "5",
+                          "Grant all Read & Write Permissions requested",
+                          isDark,
+                        ),
+                        _buildGuideStep(
+                          "6",
+                          "Walk for a few minutes or wait for the data to sync",
+                          isDark,
+                        ),
+                        _buildGuideStep(
+                          "7",
+                          "Return to Arcare App and refresh",
+                          isDark,
+                        ),
                       ],
                     ),
                   ),
@@ -4164,7 +4888,10 @@ class GoogleFitSetupGuideScreen extends StatelessWidget {
                     },
                     child: const Text(
                       "Sync & Refresh Dashboard",
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -4183,8 +4910,12 @@ class GoogleFitSetupGuideScreen extends StatelessWidget {
       child: Row(
         children: [
           Icon(
-            completed ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-            color: completed ? const Color(0xFF00C781) : (isDark ? Colors.white24 : Colors.black26),
+            completed
+                ? Icons.check_circle_rounded
+                : Icons.radio_button_unchecked_rounded,
+            color: completed
+                ? const Color(0xFF00C781)
+                : (isDark ? Colors.white24 : Colors.black26),
             size: 18,
           ),
           const SizedBox(width: 10),
@@ -4258,7 +4989,8 @@ class SleepRingPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final double radius = min(size.width / 2, size.height / 2) - strokeWidth / 2;
+    final double radius =
+        min(size.width / 2, size.height / 2) - strokeWidth / 2;
     final Offset center = Offset(size.width / 2, size.height / 2);
 
     final Paint bgPaint = Paint()
@@ -4288,4 +5020,3 @@ class SleepRingPainter extends CustomPainter {
   bool shouldRepaint(covariant SleepRingPainter oldDelegate) =>
       oldDelegate.progress != progress || oldDelegate.color != color;
 }
-

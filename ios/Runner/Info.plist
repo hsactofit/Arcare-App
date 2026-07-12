@@ -45,6 +45,8 @@
 	<string>Allow access to health data to sync step counts, vitals, sleep, calories, weight, and blood pressure with your dashboard.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Allow access to write health data to log hydration intake details directly.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Allow camera access to scan QR codes for checking in to partner gyms.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

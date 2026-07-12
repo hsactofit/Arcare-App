@@ -72,8 +72,9 @@ class _MetricDetailScreenState extends State<MetricDetailScreen>
       final token = await AuthService.instance.getAccessToken();
       // Ensure we encode the email correctly.
       final encodedEmail = Uri.encodeComponent(widget.email);
+      final metricParam = widget.metric.toLowerCase() == 'fitness' ? 'workouts' : widget.metric;
       final url =
-          'https://api.prabhash.site/api/health/graph/$encodedEmail?metric=${widget.metric}&period=$_selectedPeriod';
+          'https://api.prabhash.site/api/health/graph/$encodedEmail?metric=$metricParam&period=$_selectedPeriod';
 
       var response = await http.get(
         Uri.parse(url),

@@ -44,6 +44,7 @@ dependencies:
   sign_in_with_apple: ^7.0.1
   crypto: ^3.0.7
   http: ^1.2.2
+  mobile_scanner: ^7.2.0
 
 dev_dependencies:
   flutter_test:
