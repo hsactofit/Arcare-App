@@ -75,6 +75,22 @@ class ApiService {
     }
   }
 
+  /// GET /api/health/trends/{email} (Health Trends Data)
+  Future<Map<String, dynamic>> fetchProgressTrends(String email, String period) async {
+    final periodParam = period.toLowerCase(); // 'daily', 'weekly', 'monthly'
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get(
+      '/api/health/trends/$encodedEmail',
+      queryParams: {'period': periodParam},
+    );
+
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception("Failed to load progress trends: ${response.statusCode}");
+    }
+  }
+
   /// GET /api/health/graph/{email} (Graph data)
   Future<Map<String, dynamic>> fetchGraphData({
     required String email,
