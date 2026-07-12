@@ -1,8 +1,6 @@
-import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import '../services/auth_service.dart';
+import '../services/api_service.dart';
 import '../widgets/glass_card.dart';
 
 class MetricDetailScreen extends StatefulWidget {
@@ -69,50 +67,23 @@ class _MetricDetailScreenState extends State<MetricDetailScreen>
     });
 
     try {
-      final token = await AuthService.instance.getAccessToken();
-      // Ensure we encode the email correctly.
-      final encodedEmail = Uri.encodeComponent(widget.email);
-      final metricParam = widget.metric.toLowerCase() == 'fitness' ? 'workouts' : widget.metric;
-      final url =
-          'https://api.prabhash.site/api/health/graph/$encodedEmail?metric=$metricParam&period=$_selectedPeriod';
-
-      var response = await http.get(
-        Uri.parse(url),
-        headers: {if (token != null) 'Authorization': 'Bearer $token'},
+      final data = await ApiService.instance.fetchGraphData(
+        email: widget.email,
+        metric: widget.metric,
+        period: _selectedPeriod,
+        title: widget.title,
       );
 
-      // Handle 401 Authorization Token refresh
-      if (response.statusCode == 401) {
-        await AuthService.instance.refreshSessionToken();
-        final newToken = await AuthService.instance.getAccessToken();
-        response = await http.get(
-          Uri.parse(url),
-          headers: {if (newToken != null) 'Authorization': 'Bearer $newToken'},
-        );
-      }
-
-      if (response.statusCode == 200) {
-        debugPrint("API Response ($url): ${response.body}");
-        final Map<String, dynamic> data = jsonDecode(response.body);
-        setState(() {
-          _apiResponse = data;
-          _chartData = data['data'] ?? [];
-          _isLoading = false;
-        });
-        _chartAnimController.forward(from: 0.0);
-      } else {
-        debugPrint(
-          "API Error ($url): Status ${response.statusCode} - ${response.body}",
-        );
-        setState(() {
-          _errorMessage = "Server error: ${response.statusCode}";
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      debugPrint("API Exception: $e");
       setState(() {
-        _errorMessage = "Network or parsing error occurred: $e";
+        _apiResponse = data;
+        _chartData = data['data'] ?? [];
+        _isLoading = false;
+      });
+      _chartAnimController.forward(from: 0.0);
+    } catch (e) {
+      debugPrint("API Error: $e");
+      setState(() {
+        _errorMessage = e.toString();
         _isLoading = false;
       });
     }

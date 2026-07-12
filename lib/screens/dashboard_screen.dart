@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:health/health.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/health_service.dart';
+import '../services/api_service.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/metric_card.dart';
 import '../widgets/concentric_rings_chart.dart';
@@ -279,31 +280,11 @@ class DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _fetchActiveChallenges() async {
     try {
-      final token = await AuthService.instance.getAccessToken();
-      final url = '${AuthService.apiBaseUrl}/api/challenges';
-
-      var response = await http.get(
-        Uri.parse(url),
-        headers: {if (token != null) 'Authorization': 'Bearer $token'},
-      );
-
-      if (response.statusCode == 401) {
-        await AuthService.instance.refreshSessionToken();
-        final newToken = await AuthService.instance.getAccessToken();
-        response = await http.get(
-          Uri.parse(url),
-          headers: {if (newToken != null) 'Authorization': 'Bearer $newToken'},
-        );
-      }
-
-      if (response.statusCode == 200) {
-        final List<dynamic> list = jsonDecode(response.body);
-        final parsed = list.map((item) => Challenge.fromJson(item)).toList();
-        setState(() {
-          _activeChallenges = parsed.where((c) => c.isJoined).toList();
-        });
-        _updateAutoScrollState();
-      }
+      final active = await ApiService.instance.fetchActiveChallenges();
+      setState(() {
+        _activeChallenges = active;
+      });
+      _updateAutoScrollState();
     } catch (e) {
       debugPrint("Error fetching active challenges for dashboard: $e");
     }

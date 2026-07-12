@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/health_service.dart';
+import '../services/api_service.dart';
 import '../widgets/glass_card.dart';
 
 class ProgressScreen extends StatefulWidget {
@@ -16,7 +16,12 @@ class _ProgressScreenState extends State<ProgressScreen> {
   @override
   void initState() {
     super.initState();
-    _dailyDataFuture = HealthService.instance.fetchDailyHealthDataForPeriod(days: 7);
+    _dailyDataFuture = _fetchTrendsFromServer();
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchTrendsFromServer() async {
+    final email = await ApiService.instance.getUserEmail();
+    return ApiService.instance.fetchTrends(email, _selectedPeriod);
   }
 
   @override
@@ -59,7 +64,10 @@ class _ProgressScreenState extends State<ProgressScreen> {
               children: [
                 // Title Area
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 16,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -94,7 +102,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
                     ],
                   ),
                 ),
-                
+
                 const SizedBox(height: 16),
 
                 // Main Stats Content
@@ -104,12 +112,61 @@ class _ProgressScreenState extends State<ProgressScreen> {
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
                         return const Center(
-                          child: CircularProgressIndicator(color: Colors.blueAccent),
+                          child: CircularProgressIndicator(
+                            color: Colors.blueAccent,
+                          ),
+                        );
+                      }
+
+                      if (snapshot.hasError) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Text("⚠️", style: TextStyle(fontSize: 48)),
+                              const SizedBox(height: 16),
+                              Text(
+                                "Failed to load trends from server",
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: textColor,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                ),
+                                child: Text(
+                                  "${snapshot.error}",
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              ElevatedButton(
+                                onPressed: () {
+                                  setState(() {
+                                    _dailyDataFuture = _fetchTrendsFromServer();
+                                  });
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blueAccent,
+                                  foregroundColor: Colors.white,
+                                ),
+                                child: const Text("Retry"),
+                              ),
+                            ],
+                          ),
                         );
                       }
 
                       final dailyData = snapshot.data ?? [];
-                      
+
                       // Calculate Averages/Totals
                       double totalSteps = 0;
                       double totalCalories = 0;
@@ -120,33 +177,50 @@ class _ProgressScreenState extends State<ProgressScreen> {
                       for (var day in dailyData) {
                         final steps = (day['steps'] as num).toDouble();
                         final calories = (day['calories'] as num).toDouble();
-                        final sleep = (day['sleep_duration_hours'] as num).toDouble();
-                        final water = (day['water_intake_ml'] as num).toDouble();
+                        final sleep = (day['sleep_duration_hours'] as num)
+                            .toDouble();
+                        final water = (day['water_intake_ml'] as num)
+                            .toDouble();
 
                         totalSteps += steps;
                         totalCalories += calories;
                         totalSleep += sleep;
                         totalWater += water;
-                        if (steps > 0 || calories > 0 || sleep > 0 || water > 0) {
+                        if (steps > 0 ||
+                            calories > 0 ||
+                            sleep > 0 ||
+                            water > 0) {
                           daysWithData++;
                         }
                       }
 
-                      final avgSteps = dailyData.isEmpty ? 0.0 : (totalSteps / dailyData.length);
-                      final avgSleep = dailyData.isEmpty ? 0.0 : (totalSleep / dailyData.length);
-                      final avgCalories = dailyData.isEmpty ? 0.0 : (totalCalories / dailyData.length);
-                      final avgWater = dailyData.isEmpty ? 0.0 : (totalWater / dailyData.length);
+                      final avgSteps = dailyData.isEmpty
+                          ? 0.0
+                          : (totalSteps / dailyData.length);
+                      final avgSleep = dailyData.isEmpty
+                          ? 0.0
+                          : (totalSleep / dailyData.length);
+                      final avgCalories = dailyData.isEmpty
+                          ? 0.0
+                          : (totalCalories / dailyData.length);
+                      final avgWater = dailyData.isEmpty
+                          ? 0.0
+                          : (totalWater / dailyData.length);
 
                       return RefreshIndicator(
                         onRefresh: () async {
-                          final f = HealthService.instance.fetchDailyHealthDataForPeriod(days: 7, forceRefresh: true);
+                          final f = _fetchTrendsFromServer();
                           setState(() {
                             _dailyDataFuture = f;
                           });
-                          await f;
+                          try {
+                            await f;
+                          } catch (_) {}
                         },
                         child: ListView(
-                          physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                          physics: const BouncingScrollPhysics(
+                            parent: AlwaysScrollableScrollPhysics(),
+                          ),
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           children: [
                             // Overview Summary Cards Grid
@@ -158,10 +232,34 @@ class _ProgressScreenState extends State<ProgressScreen> {
                               crossAxisSpacing: 12,
                               mainAxisSpacing: 12,
                               children: [
-                                _buildMetricSummaryCard("🚶 Steps", "${avgSteps.round()}", "avg/day", Colors.green, isDark),
-                                _buildMetricSummaryCard("🔥 Calories", "${avgCalories.round()} kcal", "avg/day", Colors.orange, isDark),
-                                _buildMetricSummaryCard("🌙 Sleep", "${avgSleep.toStringAsFixed(1)} hrs", "avg/night", Colors.purple, isDark),
-                                _buildMetricSummaryCard("💧 Hydration", "${avgWater.round()} ml", "avg/day", Colors.blue, isDark),
+                                _buildMetricSummaryCard(
+                                  "🚶 Steps",
+                                  "${avgSteps.round()}",
+                                  "avg/day",
+                                  Colors.green,
+                                  isDark,
+                                ),
+                                _buildMetricSummaryCard(
+                                  "🔥 Calories",
+                                  "${avgCalories.round()} kcal",
+                                  "avg/day",
+                                  Colors.orange,
+                                  isDark,
+                                ),
+                                _buildMetricSummaryCard(
+                                  "🌙 Sleep",
+                                  "${avgSleep.toStringAsFixed(1)} hrs",
+                                  "avg/night",
+                                  Colors.purple,
+                                  isDark,
+                                ),
+                                _buildMetricSummaryCard(
+                                  "💧 Hydration",
+                                  "${avgWater.round()} ml",
+                                  "avg/day",
+                                  Colors.blue,
+                                  isDark,
+                                ),
                               ],
                             ),
 
@@ -193,7 +291,9 @@ class _ProgressScreenState extends State<ProgressScreen> {
                                 final String dateStr = day['date'] as String;
                                 final steps = day['steps'] as int;
                                 final calories = day['calories'] as int;
-                                final double sleep = (day['sleep_duration_hours'] as num).toDouble();
+                                final double sleep =
+                                    (day['sleep_duration_hours'] as num)
+                                        .toDouble();
                                 final water = day['water_intake_ml'] as int;
 
                                 return Padding(
@@ -201,10 +301,12 @@ class _ProgressScreenState extends State<ProgressScreen> {
                                   child: GlassCard(
                                     padding: const EdgeInsets.all(16),
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
                                       children: [
                                         Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
                                           children: [
                                             Text(
                                               _formatDate(dateStr),
@@ -214,17 +316,34 @@ class _ProgressScreenState extends State<ProgressScreen> {
                                                 color: textColor,
                                               ),
                                             ),
-                                            const Icon(Icons.check_circle_outline, color: Colors.green, size: 16),
+                                            const Icon(
+                                              Icons.check_circle_outline,
+                                              color: Colors.green,
+                                              size: 16,
+                                            ),
                                           ],
                                         ),
                                         const SizedBox(height: 12),
                                         Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
                                           children: [
-                                            _buildLogMetric("🚶 $steps", "steps"),
-                                            _buildLogMetric("🔥 $calories", "kcal"),
-                                            _buildLogMetric("🌙 ${sleep.toStringAsFixed(1)}h", "sleep"),
-                                            _buildLogMetric("💧 ${water}ml", "water"),
+                                            _buildLogMetric(
+                                              "🚶 $steps",
+                                              "steps",
+                                            ),
+                                            _buildLogMetric(
+                                              "🔥 $calories",
+                                              "kcal",
+                                            ),
+                                            _buildLogMetric(
+                                              "🌙 ${sleep.toStringAsFixed(1)}h",
+                                              "sleep",
+                                            ),
+                                            _buildLogMetric(
+                                              "💧 ${water}ml",
+                                              "water",
+                                            ),
                                           ],
                                         ),
                                       ],
@@ -233,7 +352,9 @@ class _ProgressScreenState extends State<ProgressScreen> {
                                 );
                               }).toList(),
 
-                            const SizedBox(height: 80), // Padding to clear bottom navigation bar
+                            const SizedBox(
+                              height: 80,
+                            ), // Padding to clear bottom navigation bar
                           ],
                         ),
                       );
@@ -257,14 +378,20 @@ class _ProgressScreenState extends State<ProgressScreen> {
       elevation: 0,
       pressElevation: 0,
       selectedColor: Colors.blueAccent,
-      backgroundColor: isDark ? Colors.white.withOpacity(0.04) : Colors.black.withOpacity(0.03),
+      backgroundColor: isDark
+          ? Colors.white.withOpacity(0.04)
+          : Colors.black.withOpacity(0.03),
       side: BorderSide(
-        color: isSelected ? Colors.blueAccent : (isDark ? Colors.white10 : Colors.black12),
+        color: isSelected
+            ? Colors.blueAccent
+            : (isDark ? Colors.white10 : Colors.black12),
       ),
       label: Text(
         label,
         style: TextStyle(
-          color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
+          color: isSelected
+              ? Colors.white
+              : (isDark ? Colors.white70 : Colors.black87),
           fontSize: 12,
           fontWeight: FontWeight.bold,
         ),
@@ -273,13 +400,20 @@ class _ProgressScreenState extends State<ProgressScreen> {
         if (selected) {
           setState(() {
             _selectedPeriod = label;
+            _dailyDataFuture = _fetchTrendsFromServer();
           });
         }
       },
     );
   }
 
-  Widget _buildMetricSummaryCard(String title, String value, String subtitle, Color color, bool isDark) {
+  Widget _buildMetricSummaryCard(
+    String title,
+    String value,
+    String subtitle,
+    Color color,
+    bool isDark,
+  ) {
     final textColor = isDark ? Colors.white : Colors.black87;
     return GlassCard(
       padding: const EdgeInsets.all(12),
@@ -323,18 +457,9 @@ class _ProgressScreenState extends State<ProgressScreen> {
       children: [
         Text(
           value,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 13,
-          ),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
         ),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.grey,
-            fontSize: 10,
-          ),
-        ),
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 10)),
       ],
     );
   }
@@ -343,20 +468,49 @@ class _ProgressScreenState extends State<ProgressScreen> {
     try {
       final parts = dateStr.split('-');
       if (parts.length != 3) return dateStr;
-      final date = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+      final date = DateTime(
+        int.parse(parts[0]),
+        int.parse(parts[1]),
+        int.parse(parts[2]),
+      );
       final now = DateTime.now();
-      
-      if (date.year == now.year && date.month == now.month && date.day == now.day) {
+
+      if (date.year == now.year &&
+          date.month == now.month &&
+          date.day == now.day) {
         return "Today";
       }
-      
+
       final yesterday = now.subtract(const Duration(days: 1));
-      if (date.year == yesterday.year && date.month == yesterday.month && date.day == yesterday.day) {
+      if (date.year == yesterday.year &&
+          date.month == yesterday.month &&
+          date.day == yesterday.day) {
         return "Yesterday";
       }
 
-      final List<String> weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-      final List<String> months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      final List<String> weekdays = [
+        "Mon",
+        "Tue",
+        "Wed",
+        "Thu",
+        "Fri",
+        "Sat",
+        "Sun",
+      ];
+      final List<String> months = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+      ];
       return "${weekdays[date.weekday - 1]}, ${months[date.month - 1]} ${date.day}";
     } catch (_) {
       return dateStr;
