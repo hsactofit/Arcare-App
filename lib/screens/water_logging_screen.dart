@@ -1,25 +1,34 @@
-import 'dart:convert';
 import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import '../services/health_service.dart';
-import '../services/auth_service.dart';
+import '../services/api_service.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/water/wave_painter.dart';
 
+/// Matches OpenAPI `WaterLogResponse`: id (int), amount (int), timestamp (date-time).
 class WaterLog {
-  final String? id;
+  final int? id;
   final int amount;
   final DateTime timestamp;
+
   WaterLog({this.id, required this.amount, required this.timestamp});
 
   factory WaterLog.fromJson(Map<String, dynamic> json) {
+    final amountRaw = json['amount'];
+    final amount = amountRaw is num
+        ? amountRaw.round()
+        : int.tryParse('$amountRaw') ?? 0;
+    final idRaw = json['id'];
+    final id = idRaw is num
+        ? idRaw.toInt()
+        : int.tryParse('$idRaw');
+
     return WaterLog(
-      id: json['id']?.toString(),
-      amount: json['amount'] as int,
-      timestamp: DateTime.parse(json['timestamp'] as String),
+      id: id,
+      amount: amount,
+      timestamp: DateTime.tryParse(json['timestamp']?.toString() ?? '') ??
+          DateTime.now(),
     );
   }
 }
@@ -41,10 +50,12 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
   bool _logsExpanded = false;
   List<WaterLog> _waterLogs = [];
 
-  // Graph states
-  String _selectedGraphPeriod = "week"; // "day", "week", "month"
+  // Graph states (period: day | week | month per API docs)
+  String _selectedGraphPeriod = "week";
   List<Map<String, dynamic>> _graphData = [];
   bool _isLoadingGraph = false;
+  String? _graphError;
+  String? _logsError;
 
   late AnimationController _waveController;
   late AnimationController _levelController;
@@ -94,117 +105,97 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
   }
 
   Future<void> _fetchGraphData() async {
-    setState(() => _isLoadingGraph = true);
-    final prefs = await SharedPreferences.getInstance();
-    final jsonStr = prefs.getString('onboarding_data');
-    if (jsonStr == null) {
-      setState(() => _isLoadingGraph = false);
-      return;
-    }
-
-    final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
-    final email = onboarding['auth']?['email'];
-    if (email == null) {
-      setState(() => _isLoadingGraph = false);
-      return;
-    }
+    if (!mounted) return;
+    setState(() {
+      _isLoadingGraph = true;
+      _graphError = null;
+    });
 
     try {
-      final token = await AuthService.instance.getAccessToken();
-      final url =
-          '${AuthService.apiBaseUrl}/api/water/graph/${Uri.encodeComponent(email)}?period=$_selectedGraphPeriod';
+      final email = await ApiService.instance.getUserEmail();
+      final resData = await ApiService.instance
+          .fetchWaterGraph(email, _selectedGraphPeriod);
 
-      var response = await http.get(
-        Uri.parse(url),
-        headers: {if (token != null) 'Authorization': 'Bearer $token'},
-      );
+      // WaterGraphResponse: { period, data: [{ label, amount }] }
+      dynamic raw = resData['data'];
+      if (raw is Map) {
+        raw = raw['data'] ?? raw['points'] ?? raw['items'];
+      }
+      raw ??= resData['points'] ?? resData['items'];
 
-      if (response.statusCode == 401) {
-        await AuthService.instance.refreshSessionToken();
-        final newToken = await AuthService.instance.getAccessToken();
-        response = await http.get(
-          Uri.parse(url),
-          headers: {if (newToken != null) 'Authorization': 'Bearer $newToken'},
-        );
+      final parsed = <Map<String, dynamic>>[];
+      if (raw is List) {
+        for (final item in raw) {
+          if (item is! Map) continue;
+          final m = Map<String, dynamic>.from(item);
+          final amountRaw = m['amount'] ?? m['value'] ?? m['water'] ?? 0;
+          final amount = amountRaw is num
+              ? amountRaw.toDouble()
+              : double.tryParse('$amountRaw') ?? 0.0;
+          parsed.add({
+            'label': (m['label'] ?? m['date'] ?? m['day'] ?? '').toString(),
+            'amount': amount,
+          });
+        }
       }
 
-      if (response.statusCode == 200) {
-        // Debug log the graph API response
-        debugPrint("================ WATER GRAPH API RESPONSE ================");
-        debugPrint("Response Body: ${response.body}");
-        debugPrint("==========================================================");
-
-        final Map<String, dynamic> resData = jsonDecode(response.body);
-        final List<dynamic> dataList = resData['data'] ?? [];
-        setState(() {
-          _graphData = List<Map<String, dynamic>>.from(dataList);
-          _isLoadingGraph = false;
-        });
-      } else {
-        setState(() => _isLoadingGraph = false);
-      }
+      if (!mounted) return;
+      setState(() {
+        _graphData = parsed;
+        _isLoadingGraph = false;
+        _graphError = null;
+      });
     } catch (e) {
       debugPrint("Error fetching water graph: $e");
-      setState(() => _isLoadingGraph = false);
+      if (!mounted) return;
+      setState(() {
+        _isLoadingGraph = false;
+        _graphData = [];
+        _graphError = e.toString().replaceFirst('Exception: ', '');
+      });
     }
   }
 
   Future<void> _fetchLogs() async {
-    setState(() => _isLoadingLogs = true);
-    final prefs = await SharedPreferences.getInstance();
-    final jsonStr = prefs.getString('onboarding_data');
-    if (jsonStr == null) {
-      setState(() => _isLoadingLogs = false);
-      return;
-    }
-
-    final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
-    final email = onboarding['auth']?['email'];
-    if (email == null) {
-      setState(() => _isLoadingLogs = false);
-      return;
-    }
+    if (!mounted) return;
+    setState(() {
+      _isLoadingLogs = true;
+      _logsError = null;
+    });
 
     try {
-      final token = await AuthService.instance.getAccessToken();
-      final url =
-          '${AuthService.apiBaseUrl}/api/water/logs/${Uri.encodeComponent(email)}';
+      final email = await ApiService.instance.getUserEmail();
+      // HydrationHistoryResponse: { water_intake_today, logs: WaterLogResponse[] }
+      final resData = await ApiService.instance.fetchWaterLogs(email);
 
-      var response = await http.get(
-        Uri.parse(url),
-        headers: {if (token != null) 'Authorization': 'Bearer $token'},
-      );
+      final totalRaw = resData['water_intake_today'] ?? 0;
+      final totalToday = totalRaw is num
+          ? totalRaw.round()
+          : int.tryParse('$totalRaw') ?? 0;
+      final logsJson = resData['logs'] as List<dynamic>? ?? [];
 
-      if (response.statusCode == 401) {
-        await AuthService.instance.refreshSessionToken();
-        final newToken = await AuthService.instance.getAccessToken();
-        response = await http.get(
-          Uri.parse(url),
-          headers: {if (newToken != null) 'Authorization': 'Bearer $newToken'},
-        );
-      }
+      await HealthService.instance.setWaterIntakeToday(totalToday.toDouble());
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> resData = jsonDecode(response.body);
-        final int totalToday = resData['water_intake_today'] ?? 0;
-        final List<dynamic> logsJson = resData['logs'] ?? [];
-
-        await HealthService.instance.setWaterIntakeToday(totalToday.toDouble());
-
-        setState(() {
-          debugPrint('Water logs fetched successfully: $resData');
-          _currentIntake = totalToday.toDouble();
-          _startIntakeProgress = (_currentIntake / _waterGoal).clamp(0.0, 1.0);
-          _targetIntakeProgress = _startIntakeProgress;
-          _waterLogs = logsJson.map((x) => WaterLog.fromJson(x)).toList();
-          _isLoadingLogs = false;
-        });
-      } else {
-        setState(() => _isLoadingLogs = false);
-      }
+      if (!mounted) return;
+      setState(() {
+        _currentIntake = totalToday.toDouble();
+        _startIntakeProgress = (_currentIntake / _waterGoal).clamp(0.0, 1.0);
+        _targetIntakeProgress = _startIntakeProgress;
+        _waterLogs = logsJson
+            .whereType<Map>()
+            .map((x) => WaterLog.fromJson(Map<String, dynamic>.from(x)))
+            .toList()
+          ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+        _isLoadingLogs = false;
+        _logsError = null;
+      });
     } catch (e) {
       debugPrint("Error fetching water logs: $e");
-      setState(() => _isLoadingLogs = false);
+      if (!mounted) return;
+      setState(() {
+        _isLoadingLogs = false;
+        _logsError = e.toString().replaceFirst('Exception: ', '');
+      });
     }
   }
 
@@ -247,97 +238,38 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
   }
 
   Future<void> _logWater(int amount) async {
-    if (amount <= 0) return;
+    if (amount <= 0 || _isSyncing) return;
 
     setState(() => _isSyncing = true);
 
-    // Save locally
+    // Optimistic local update + animation
     final success = await HealthService.instance.logWater(amount);
-
     if (success) {
-      final now = DateTime.now();
       final oldIntake = _currentIntake;
       final newIntake = oldIntake + amount;
-
-      // Setup level rise animation
       _startIntakeProgress = (oldIntake / _waterGoal).clamp(0.0, 1.0);
       _targetIntakeProgress = (newIntake / _waterGoal).clamp(0.0, 1.0);
+      _levelAnimation = Tween<double>(
+        begin: _startIntakeProgress,
+        end: _targetIntakeProgress,
+      ).animate(
+        CurvedAnimation(parent: _levelController, curve: Curves.easeOutBack),
+      );
+      setState(() => _currentIntake = newIntake);
+      _levelController
+        ..reset()
+        ..forward();
+    }
 
-      _levelAnimation =
-          Tween<double>(
-            begin: _startIntakeProgress,
-            end: _targetIntakeProgress,
-          ).animate(
-            CurvedAnimation(
-              parent: _levelController,
-              curve: Curves.easeOutBack,
-            ),
-          );
-
-      setState(() {
-        _currentIntake = newIntake;
+    try {
+      // POST /api/water/log/{email} — WaterLogCreate
+      final email = await ApiService.instance.getUserEmail();
+      await ApiService.instance.addWaterLog(email, {
+        'amount': amount,
+        'timestamp': DateTime.now().toUtc().toIso8601String(),
       });
 
-      _levelController.reset();
-      _levelController.forward();
-
-      // Refresh parent dashboard
-      if (widget.onWaterLogged != null) {
-        widget.onWaterLogged!();
-      }
-
-      // Sync to API with Auth & Refresh Token
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        final jsonStr = prefs.getString('onboarding_data');
-        if (jsonStr != null) {
-          final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
-          final email = onboarding['auth']?['email'];
-          if (email != null) {
-            final token = await AuthService.instance.getAccessToken();
-            final url =
-                '${AuthService.apiBaseUrl}/api/water/log/${Uri.encodeComponent(email)}';
-
-            var response = await http.post(
-              Uri.parse(url),
-              headers: {
-                'Content-Type': 'application/json',
-                if (token != null) 'Authorization': 'Bearer $token',
-              },
-              body: jsonEncode({
-                'amount': amount,
-                'timestamp': now.toIso8601String(),
-              }),
-            );
-
-            if (response.statusCode == 401) {
-              await AuthService.instance.refreshSessionToken();
-              final newToken = await AuthService.instance.getAccessToken();
-              response = await http.post(
-                Uri.parse(url),
-                headers: {
-                  'Content-Type': 'application/json',
-                  if (newToken != null) 'Authorization': 'Bearer $newToken',
-                },
-                body: jsonEncode({
-                  'amount': amount,
-                  'timestamp': now.toIso8601String(),
-                }),
-              );
-            }
-
-            // Debug log the logged water API response
-            debugPrint("================ SYNC MANUAL WATER API RESPONSE ================");
-            debugPrint("Status Code: ${response.statusCode}");
-            debugPrint("Response Body: ${response.body}");
-            debugPrint("=================================================================");
-          }
-        }
-      } catch (e) {
-        debugPrint("Error syncing logged water to backend: $e");
-      }
-
-      // Reload graph and logs history list
+      widget.onWaterLogged?.call();
       await _fetchLogs();
       await _fetchGraphData();
 
@@ -346,103 +278,100 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
         SnackBar(
           content: Text("Logged +$amount ml of water!"),
           backgroundColor: Colors.blueAccent,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
-    } else {
+    } catch (e) {
+      debugPrint("Error syncing logged water to backend: $e");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Error logging water locally."),
+        SnackBar(
+          content: Text(
+            "Failed to sync water log: ${e.toString().replaceFirst('Exception: ', '')}",
+          ),
           backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
         ),
       );
+      // Re-sync totals from server / local after failure
+      await _fetchLogs();
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
     }
-
-    setState(() => _isSyncing = false);
   }
 
   Future<void> _deleteLog(WaterLog log) async {
-    if (log.id == null) return;
+    if (log.id == null || _isSyncing) return;
     setState(() => _isSyncing = true);
 
     try {
-      final token = await AuthService.instance.getAccessToken();
-      final url = '${AuthService.apiBaseUrl}/api/water/log/${log.id}';
-
-      var response = await http.delete(
-        Uri.parse(url),
-        headers: {if (token != null) 'Authorization': 'Bearer $token'},
+      // DELETE /api/water/log/{log_id}
+      await ApiService.instance.deleteWaterLog(log.id!);
+      await HealthService.instance.updateLocalWaterIntake(
+        -log.amount.toDouble(),
       );
 
-      if (response.statusCode == 401) {
-        await AuthService.instance.refreshSessionToken();
-        final newToken = await AuthService.instance.getAccessToken();
-        response = await http.delete(
-          Uri.parse(url),
-          headers: {if (newToken != null) 'Authorization': 'Bearer $newToken'},
-        );
-      }
+      widget.onWaterLogged?.call();
+      await _fetchLogs();
+      await _fetchGraphData();
 
-      // Debug log the delete water log API response
-      debugPrint("================ DELETE WATER LOG API RESPONSE ================");
-      debugPrint("Status Code: ${response.statusCode}");
-      debugPrint("Response Body: ${response.body}");
-      debugPrint("===============================================================");
-
-      if (response.statusCode == 200) {
-        // Adjust local pref data
-        await HealthService.instance.updateLocalWaterIntake(
-          -log.amount.toDouble(),
-        );
-
-        setState(() {
-          _waterLogs.removeWhere((x) => x.id == log.id);
-          _currentIntake = (_currentIntake - log.amount).clamp(
-            0.0,
-            double.infinity,
-          );
-          _startIntakeProgress = (_currentIntake / _waterGoal).clamp(0.0, 1.0);
-          _targetIntakeProgress = _startIntakeProgress;
-        });
-
-        // Trigger callback to refresh Dashboard
-        if (widget.onWaterLogged != null) {
-          widget.onWaterLogged!();
-        }
-
-        // Fetch graph and logs fresh
-        await _fetchGraphData();
-
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Log deleted successfully")),
-        );
-      } else {
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("Failed to delete log")));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Log deleted successfully"),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } catch (e) {
       debugPrint("Error deleting log: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Failed to delete: ${e.toString().replaceFirst('Exception: ', '')}",
+          ),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } finally {
-      setState(() => _isSyncing = false);
+      if (mounted) setState(() => _isSyncing = false);
     }
   }
 
   Future<void> _showEditDialog(WaterLog log) async {
     final controller = TextEditingController(text: log.amount.toString());
-    showDialog(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    await showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text("Edit Water Log"),
+          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text(
+            "Edit Water Log",
+            style: TextStyle(fontWeight: FontWeight.w900),
+          ),
           content: TextField(
             controller: controller,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
+            autofocus: true,
+            decoration: InputDecoration(
               hintText: "Enter amount (ml)",
-              prefixIcon: Icon(Icons.water_drop, color: Colors.blueAccent),
+              prefixIcon:
+                  const Icon(Icons.water_drop, color: Colors.blueAccent),
+              filled: true,
+              fillColor: isDark
+                  ? Colors.white.withOpacity(0.06)
+                  : Colors.black.withOpacity(0.04),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
             ),
           ),
           actions: [
@@ -451,8 +380,15 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
               child: const Text("Cancel"),
             ),
             ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
               onPressed: () {
-                final amount = int.tryParse(controller.text) ?? 0;
+                final amount = int.tryParse(controller.text.trim()) ?? 0;
                 if (amount > 0) {
                   Navigator.pop(context);
                   _updateLog(log, amount);
@@ -464,90 +400,65 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
         );
       },
     );
+    controller.dispose();
   }
 
   Future<void> _updateLog(WaterLog log, int newAmount) async {
-    if (log.id == null) return;
+    if (log.id == null || _isSyncing) return;
     setState(() => _isSyncing = true);
 
     try {
-      final token = await AuthService.instance.getAccessToken();
-      final url = '${AuthService.apiBaseUrl}/api/water/log/${log.id}';
+      // PUT /api/water/log/{log_id} — WaterLogCreate body
+      final result = await ApiService.instance.updateWaterLog(log.id!, {
+        'amount': newAmount,
+        'timestamp': log.timestamp.toUtc().toIso8601String(),
+      });
 
-      var response = await http.put(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'amount': newAmount,
-          'timestamp': log.timestamp.toIso8601String(),
-        }),
-      );
+      // Prefer server values when present
+      final serverAmount = (result['amount'] as num?)?.round() ?? newAmount;
+      final serverTs = DateTime.tryParse(result['timestamp']?.toString() ?? '') ??
+          log.timestamp;
 
-      if (response.statusCode == 401) {
-        await AuthService.instance.refreshSessionToken();
-        final newToken = await AuthService.instance.getAccessToken();
-        response = await http.put(
-          Uri.parse(url),
-          headers: {
-            'Content-Type': 'application/json',
-            if (newToken != null) 'Authorization': 'Bearer $newToken',
-          },
-          body: jsonEncode({
-            'amount': newAmount,
-            'timestamp': log.timestamp.toIso8601String(),
-          }),
-        );
-      }
+      final delta = (serverAmount - log.amount).toDouble();
+      await HealthService.instance.updateLocalWaterIntake(delta);
 
-      // Debug log the update water log API response
-      debugPrint("================ UPDATE WATER LOG API RESPONSE ================");
-      debugPrint("Status Code: ${response.statusCode}");
-      debugPrint("Response Body: ${response.body}");
-      debugPrint("===============================================================");
+      widget.onWaterLogged?.call();
+      await _fetchLogs();
+      await _fetchGraphData();
 
-      if (response.statusCode == 200) {
-        final delta = (newAmount - log.amount).toDouble();
-        await HealthService.instance.updateLocalWaterIntake(delta);
-
-        setState(() {
-          final idx = _waterLogs.indexWhere((x) => x.id == log.id);
-          if (idx != -1) {
-            _waterLogs[idx] = WaterLog(
-              id: log.id,
-              amount: newAmount,
-              timestamp: log.timestamp,
-            );
-          }
-          _currentIntake = (_currentIntake + delta).clamp(0.0, double.infinity);
-          _startIntakeProgress = (_currentIntake / _waterGoal).clamp(0.0, 1.0);
-          _targetIntakeProgress = _startIntakeProgress;
-        });
-
-        // Trigger callback to refresh Dashboard
-        if (widget.onWaterLogged != null) {
-          widget.onWaterLogged!();
+      if (!mounted) return;
+      // Keep local list snappy if fetch is slow
+      setState(() {
+        final idx = _waterLogs.indexWhere((x) => x.id == log.id);
+        if (idx != -1) {
+          _waterLogs[idx] = WaterLog(
+            id: log.id,
+            amount: serverAmount,
+            timestamp: serverTs,
+          );
         }
+      });
 
-        // Fetch graph data fresh
-        await _fetchGraphData();
-
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Log updated successfully")),
-        );
-      } else {
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("Failed to update log")));
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Log updated successfully"),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } catch (e) {
       debugPrint("Error updating log: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Failed to update: ${e.toString().replaceFirst('Exception: ', '')}",
+          ),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } finally {
-      setState(() => _isSyncing = false);
+      if (mounted) setState(() => _isSyncing = false);
     }
   }
 
@@ -1009,17 +920,31 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
   }
 
   Widget _buildGraphView(bool isDark) {
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final muted = isDark ? Colors.white54 : Colors.black45;
+
     return GlassCard(
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                "Hydration Trends 📊",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              Expanded(
+                child: Text(
+                  "Hydration Trends",
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                    color: textColor,
+                  ),
+                ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Refresh graph',
+                icon: Icon(Icons.refresh_rounded, size: 18, color: muted),
+                onPressed: _isLoadingGraph ? null : _fetchGraphData,
               ),
               Container(
                 decoration: BoxDecoration(
@@ -1037,21 +962,62 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
               ),
             ],
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 8),
+          Text(
+            "Period: day · week · month",
+            style: TextStyle(fontSize: 11, color: muted, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 16),
           if (_isLoadingGraph)
             const SizedBox(
-              height: 150,
+              height: 170,
               child: Center(
                 child: CircularProgressIndicator(color: Colors.blueAccent),
               ),
             )
+          else if (_graphError != null)
+            SizedBox(
+              height: 170,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.wifi_off_rounded, color: muted, size: 28),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Could not load graph',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        _graphError!,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11, color: muted),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _fetchGraphData,
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            )
           else if (_graphData.isEmpty)
-            const SizedBox(
-              height: 150,
+            SizedBox(
+              height: 170,
               child: Center(
                 child: Text(
-                  "No graph data available",
-                  style: TextStyle(color: Colors.grey, fontSize: 13),
+                  "No hydration data for this period yet.\nLog some water to see trends.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: muted, fontSize: 13, height: 1.35),
                 ),
               ),
             )
@@ -1067,9 +1033,7 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
     return GestureDetector(
       onTap: () {
         if (!isSelected) {
-          setState(() {
-            _selectedGraphPeriod = value;
-          });
+          setState(() => _selectedGraphPeriod = value);
           _fetchGraphData();
         }
       },
@@ -1097,158 +1061,238 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
 
   Widget _buildChartLine(bool isDark) {
     final List<double> values = _graphData
-        .map((e) => (e['amount'] as num).toDouble())
+        .map((e) => (e['amount'] as num?)?.toDouble() ?? 0.0)
         .toList();
     double maxAmount = values.fold(0.0, max);
     if (maxAmount == 0.0) maxAmount = _waterGoal;
 
+    final dense = values.length > 8;
+    const minSlot = 40.0;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Container(
-              height: 150,
-              width: 50,
-              padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    "${maxAmount.round()}",
-                    style: const TextStyle(
-                      fontSize: 8,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.bold,
+        SizedBox(
+          height: 170,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final neededWidth = values.length * minSlot + 56;
+              final chartWidth = max(constraints.maxWidth, neededWidth);
+              final plotWidth = chartWidth - 52;
+
+              final chartBody = SizedBox(
+                width: chartWidth,
+                height: 170,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      width: 48,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 6, top: 4, bottom: 28),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            for (final t in [1.0, 0.75, 0.5, 0.25, 0.0])
+                              Text(
+                                t == 0
+                                    ? "0"
+                                    : "${(maxAmount * t).round()}",
+                                style: const TextStyle(
+                                  fontSize: 8,
+                                  color: Colors.grey,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
-                  Text(
-                    "${(maxAmount * 0.75).round()}",
-                    style: const TextStyle(
-                      fontSize: 8,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.bold,
+                    Expanded(
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child: CustomPaint(
+                              painter: LineChartPainter(
+                                values: values,
+                                isDark: isDark,
+                                maxAmount: maxAmount,
+                              ),
+                              child: const SizedBox.expand(),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          SizedBox(
+                            height: 22,
+                            width: plotWidth,
+                            child: _buildChartTimeline(
+                              isDark,
+                              width: plotWidth,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  Text(
-                    "${(maxAmount * 0.5).round()}",
-                    style: const TextStyle(
-                      fontSize: 8,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    "${(maxAmount * 0.25).round()}",
-                    style: const TextStyle(
-                      fontSize: 8,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Text(
-                    "0",
-                    style: TextStyle(
-                      fontSize: 8,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: SizedBox(
-                height: 150,
-                child: CustomPaint(
-                  painter: LineChartPainter(
-                    values: values,
-                    isDark: isDark,
-                    maxAmount: maxAmount,
-                  ),
-                  size: Size.infinite,
+                  ],
                 ),
+              );
+
+              if (chartWidth <= constraints.maxWidth + 0.5) {
+                return chartBody;
+              }
+
+              return Stack(
+                children: [
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: chartBody,
+                  ),
+                  if (dense)
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      bottom: 22,
+                      child: IgnorePointer(
+                        child: Container(
+                          width: 24,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.centerLeft,
+                              end: Alignment.centerRight,
+                              colors: [
+                                (isDark
+                                        ? const Color(0xFF16161C)
+                                        : Colors.white)
+                                    .withOpacity(0),
+                                (isDark
+                                        ? const Color(0xFF16161C)
+                                        : Colors.white)
+                                    .withOpacity(0.9),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+        if (dense)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              "Swipe chart to see all ${values.length} points",
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white54 : Colors.black45,
               ),
             ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            const SizedBox(width: 50),
-            Expanded(child: _buildChartTimeline(isDark)),
-          ],
+          ),
+        const SizedBox(height: 4),
+        Text(
+          _graphSummaryLine(values),
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white54 : Colors.black45,
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildChartTimeline(bool isDark) {
+  String _graphSummaryLine(List<double> values) {
+    if (values.isEmpty) return '';
+    final total = values.fold<double>(0, (a, b) => a + b);
+    final avg = total / values.length;
+    return 'Avg ${avg.round()} ml · Total ${total.round()} ml · ${values.length} points';
+  }
+
+  Widget _buildChartTimeline(bool isDark, {required double width}) {
     if (_graphData.isEmpty) return const SizedBox();
 
     final int len = _graphData.length;
-    final List<Widget> positionedLabels = [];
+    final indexes = _timelineLabelIndexes(len);
+    final double stepX = len > 1 ? width / (len - 1) : width;
+    final dense = len > 8;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double width = constraints.maxWidth;
-        final double stepX = len > 1 ? width / (len - 1) : width;
+    final labels = <Widget>[];
+    for (final i in indexes) {
+      final label = _graphData[i]['label']?.toString() ?? "";
+      final displayLabel = _formatGraphLabel(label, dense: dense);
+      final double posX = i * stepX;
+      final double left = (posX - 22).clamp(0.0, max(0.0, width - 44));
+      labels.add(
+        Positioned(
+          left: left,
+          width: 44,
+          child: Text(
+            displayLabel,
+            style: TextStyle(
+              fontSize: dense ? 8.5 : 9,
+              color: Colors.grey,
+              fontWeight: FontWeight.bold,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      );
+    }
 
-        for (int i = 0; i < len; i++) {
-          final label = _graphData[i]['label']?.toString() ?? "";
-          String displayLabel = label;
-          if (label.length == 10) {
-            displayLabel = label.substring(5); // MM-DD
-          } else if (label.contains('T')) {
-            final parts = label.split('T');
-            if (parts.length > 1) {
-              displayLabel = parts[1].substring(0, 5); // HH:MM
-            }
-          }
-
-          // Decide if we should show this label
-          bool showLabel = false;
-          if (len <= 7) {
-            showLabel = (i == 0 || i == len ~/ 2 || i == len - 1);
-          } else if (len <= 24) {
-            showLabel =
-                (i == 0 ||
-                i == len ~/ 3 ||
-                i == (2 * len) ~/ 3 ||
-                i == len - 1);
-          } else {
-            showLabel = (i == 0 || i == 9 || i == 19 || i == len - 1);
-          }
-
-          if (showLabel) {
-            final double posX = i * stepX;
-            final double left = (posX - 25).clamp(0.0, width - 50);
-            positionedLabels.add(
-              Positioned(
-                left: left,
-                width: 50,
-                child: Text(
-                  displayLabel,
-                  style: const TextStyle(
-                    fontSize: 9,
-                    color: Colors.grey,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                ),
-              ),
-            );
-          }
-        }
-
-        return SizedBox(
-          height: 16,
-          child: Stack(clipBehavior: Clip.none, children: positionedLabels),
-        );
-      },
+    return SizedBox(
+      height: 22,
+      width: width,
+      child: Stack(clipBehavior: Clip.none, children: labels),
     );
+  }
+
+  Set<int> _timelineLabelIndexes(int count) {
+    if (count <= 1) return {0};
+    if (count <= 6) return {for (var i = 0; i < count; i++) i};
+
+    final target = count > 16 ? 5 : (count > 8 ? 6 : 8);
+    final step = max(1.0, (count - 1) / (target - 1));
+    final indexes = <int>{0, count - 1};
+    for (var t = 1; t < target - 1; t++) {
+      indexes.add((t * step).round().clamp(0, count - 1));
+    }
+    return indexes;
+  }
+
+  String _formatGraphLabel(String label, {bool dense = false}) {
+    if (label.isEmpty) return '';
+
+    if (label.contains('T')) {
+      try {
+        final dt = DateTime.parse(label);
+        return dense
+            ? '${dt.hour}h'
+            : '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      } catch (_) {
+        final parts = label.split('T');
+        if (parts.length > 1 && parts[1].length >= 5) {
+          return dense ? '${parts[1].substring(0, 2)}h' : parts[1].substring(0, 5);
+        }
+      }
+    }
+
+    // YYYY-MM-DD
+    if (label.length >= 10 && label[4] == '-' && label[7] == '-') {
+      if (dense) return label.substring(8, 10); // day
+      return label.substring(5, 10); // MM-DD
+    }
+
+    if (label.length > (dense ? 4 : 6)) {
+      return label.substring(0, dense ? 4 : 6);
+    }
+    return label;
   }
 
   Widget _buildLogsView(bool isDark) {
@@ -1261,13 +1305,40 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
       );
     }
 
+    if (_logsError != null) {
+      return GlassCard(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.redAccent),
+            const SizedBox(height: 8),
+            Text(
+              "Could not load water logs",
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _logsError!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+            TextButton(onPressed: _fetchLogs, child: const Text("Retry")),
+          ],
+        ),
+      );
+    }
+
     if (_waterLogs.isEmpty) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24.0),
           child: Text(
-            "No logs recorded for today yet.",
+            "No logs recorded yet. Tap a quick amount to start.",
             style: TextStyle(color: Colors.grey, fontSize: 13),
+            textAlign: TextAlign.center,
           ),
         ),
       );
@@ -1556,6 +1627,12 @@ class LineChartPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (values.isEmpty) return;
+    if (!size.width.isFinite ||
+        !size.height.isFinite ||
+        size.width <= 0 ||
+        size.height <= 0) {
+      return;
+    }
 
     final double width = size.width;
     final double height = size.height;

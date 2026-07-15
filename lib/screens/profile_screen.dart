@@ -1,10 +1,16 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:health/health.dart';
 import '../services/auth_service.dart';
+import '../services/health_service.dart';
+import '../services/api_service.dart';
 import '../widgets/glass_card.dart';
+import '../main.dart';
 import 'welcome_screen.dart';
 import 'goals_configuration_screen.dart';
+import 'notification_settings_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -23,6 +29,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _hcConnected = false;
   bool _isLoading = true;
 
+  bool _notifAiTips = true;
+  bool _notifRewards = false;
+  bool _notifDailyReminder = true;
+  bool _notifSleepReminder = true;
+  bool _notifActivityReminder = true;
+  bool _notifChallengeUpdates = false;
+  bool _notifHydrationReminder = true;
+
   @override
   void initState() {
     super.initState();
@@ -36,19 +50,84 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // Load health connect status
       _hcConnected = prefs.getBool('healthSetupCompleted') ?? false;
 
+      // Fetch latest profile from API
+      try {
+        final profileData = await ApiService.instance.fetchUserProfile();
+        final name = profileData['name'] ?? "User";
+        final email = profileData['email'] ?? "";
+        
+        final profile = profileData['profile'] ?? {};
+        final dob = profile['dob'] ?? "Not set";
+        final gender = profile['gender'] ?? "Not set";
+        final height = (profile['height'] ?? 0.0).toDouble();
+        final weight = (profile['weight'] ?? 0.0).toDouble();
+
+        final permissions = profileData['permissions'] ?? {};
+        final hcConnectedApi = permissions['health_connect_connected'] as bool? ?? false;
+        
+        final notifications = permissions['notifications'] ?? {};
+        final aiTips = notifications['ai_tips'] as bool? ?? true;
+        final rewards = notifications['rewards'] as bool? ?? false;
+        final dailyReminder = notifications['daily_reminder'] as bool? ?? true;
+        final sleepReminder = notifications['sleep_reminder'] as bool? ?? true;
+        final activityReminder = notifications['activity_reminder'] as bool? ?? true;
+        final challengeUpdates = notifications['challenge_updates'] as bool? ?? false;
+        final hydrationReminder = notifications['hydration_reminder'] as bool? ?? true;
+
+        if (hcConnectedApi != _hcConnected) {
+          _hcConnected = hcConnectedApi;
+          await prefs.setBool('healthSetupCompleted', hcConnectedApi);
+        }
+
+        setState(() {
+          _name = name;
+          _email = email;
+          _dob = dob;
+          _gender = gender;
+          _height = height;
+          _weight = weight;
+
+          _notifAiTips = aiTips;
+          _notifRewards = rewards;
+          _notifDailyReminder = dailyReminder;
+          _notifSleepReminder = sleepReminder;
+          _notifActivityReminder = activityReminder;
+          _notifChallengeUpdates = challengeUpdates;
+          _notifHydrationReminder = hydrationReminder;
+
+          _isLoading = false;
+        });
+
+        // Also save profile data locally to cache
+        await prefs.setString('user_name', name);
+        await prefs.setString('onboarding_data', jsonEncode(profileData));
+        return;
+      } catch (apiError) {
+        debugPrint("API Profile load failed, falling back to local: $apiError");
+      }
+
       final jsonStr = prefs.getString('onboarding_data');
       if (jsonStr != null) {
         final Map<String, dynamic> data = jsonDecode(jsonStr);
         final profile = data['profile'] ?? {};
         final auth = data['auth'] ?? {};
+        final permissions = data['permissions'] ?? {};
+        final notifications = permissions['notifications'] ?? {};
 
         setState(() {
-          _name = auth['name'] ?? "User";
-          _email = auth['email'] ?? "";
+          _name = auth['name'] ?? data['name'] ?? "User";
+          _email = auth['email'] ?? data['email'] ?? "";
           _dob = profile['dob'] ?? "Not set";
           _gender = profile['gender'] ?? "Not set";
           _height = (profile['height'] ?? 0.0).toDouble();
           _weight = (profile['weight'] ?? 0.0).toDouble();
+          _notifAiTips = notifications['ai_tips'] as bool? ?? true;
+          _notifRewards = notifications['rewards'] as bool? ?? false;
+          _notifDailyReminder = notifications['daily_reminder'] as bool? ?? true;
+          _notifSleepReminder = notifications['sleep_reminder'] as bool? ?? true;
+          _notifActivityReminder = notifications['activity_reminder'] as bool? ?? true;
+          _notifChallengeUpdates = notifications['challenge_updates'] as bool? ?? false;
+          _notifHydrationReminder = notifications['hydration_reminder'] as bool? ?? true;
           _isLoading = false;
         });
       } else {
@@ -94,6 +173,315 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (bmi < 25.0) return Colors.green;
     if (bmi < 30.0) return Colors.orange;
     return Colors.redAccent;
+  }
+
+  Future<void> _showEditProfileDialog() async {
+    final nameController = TextEditingController(text: _name);
+    final heightController = TextEditingController(text: _height > 0 ? _height.toString() : "");
+    final weightController = TextEditingController(text: _weight > 0 ? _weight.toString() : "");
+    
+    String selectedGender = (_gender == "Not set" || _gender.isEmpty) ? "Male" : _gender;
+    DateTime selectedDob = (_dob == "Not set" || _dob.isEmpty) ? DateTime(1995, 1, 1) : (DateTime.tryParse(_dob) ?? DateTime(1995, 1, 1));
+    
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: isDark ? const Color(0xFF1E1E26) : Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: const Text(
+                "Edit Profile",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(labelText: "Full Name"),
+                    ),
+                    const SizedBox(height: 12),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: selectedDob,
+                          firstDate: DateTime(1900),
+                          lastDate: DateTime.now(),
+                        );
+                        if (picked != null) {
+                          setDialogState(() {
+                            selectedDob = picked;
+                          });
+                        }
+                      },
+                      child: InputDecorator(
+                        decoration: const InputDecoration(labelText: "Date of Birth"),
+                        child: Text(
+                          "${selectedDob.year}-${selectedDob.month.toString().padLeft(2, '0')}-${selectedDob.day.toString().padLeft(2, '0')}",
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: selectedGender,
+                      decoration: const InputDecoration(labelText: "Gender"),
+                      items: ["Male", "Female", "Non-binary", "Other"]
+                          .map((g) => DropdownMenuItem(value: g, child: Text(g)))
+                          .toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          setDialogState(() {
+                            selectedGender = val;
+                          });
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: heightController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: "Height (cm)"),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: weightController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: "Weight (kg)"),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueAccent,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text("Save", style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result == true) {
+      setState(() {
+        _isLoading = true;
+      });
+      try {
+        final dobStr = "${selectedDob.year}-${selectedDob.month.toString().padLeft(2, '0')}-${selectedDob.day.toString().padLeft(2, '0')}";
+            
+        final payload = {
+          "name": nameController.text.trim(),
+          "profile": {
+            "dob": dobStr,
+            "gender": selectedGender,
+            "height": double.tryParse(heightController.text) ?? 0.0,
+            "weight": double.tryParse(weightController.text) ?? 0.0,
+          }
+        };
+
+        final updatedProfile = await ApiService.instance.updateUserProfile(payload);
+        
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('user_name', nameController.text.trim());
+        await prefs.setString('onboarding_data', jsonEncode(updatedProfile));
+
+        await _loadProfileData();
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("🎉 Profile updated successfully!"),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint("Error updating profile: $e");
+        setState(() {
+          _isLoading = false;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Failed to update profile: $e"),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _showThemeSelectionDialog() async {
+    final prefs = await SharedPreferences.getInstance();
+    final currentTheme = prefs.getString('theme_mode') ?? 'system';
+    
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E26) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text("Choose Theme", style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            RadioListTile<String>(
+              title: const Text("Light"),
+              value: 'light',
+              groupValue: currentTheme,
+              onChanged: (val) => Navigator.pop(context, val),
+            ),
+            RadioListTile<String>(
+              title: const Text("Dark"),
+              value: 'dark',
+              groupValue: currentTheme,
+              onChanged: (val) => Navigator.pop(context, val),
+            ),
+            RadioListTile<String>(
+              title: const Text("System Default"),
+              value: 'system',
+              groupValue: currentTheme,
+              onChanged: (val) => Navigator.pop(context, val),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (selected != null) {
+      await prefs.setString('theme_mode', selected);
+      setState(() {
+        if (selected == 'light') {
+          themeNotifier.value = ThemeMode.light;
+        } else if (selected == 'dark') {
+          themeNotifier.value = ThemeMode.dark;
+        } else {
+          themeNotifier.value = ThemeMode.system;
+        }
+      });
+    }
+  }
+
+  Future<void> _toggleHealthConnect(bool enable) async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    if (enable) {
+      if (Platform.isAndroid) {
+        final status = await HealthService.instance.getAndroidSdkStatus();
+        if (status != HealthConnectSdkStatus.sdkAvailable) {
+          if (!mounted) return;
+          final download = await showDialog<bool>(
+            context: context,
+            builder: (context) {
+              final isDark = Theme.of(context).brightness == Brightness.dark;
+              return AlertDialog(
+                backgroundColor: isDark ? const Color(0xFF1E1E26) : Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                title: const Text("Install Health Connect", style: TextStyle(fontWeight: FontWeight.bold)),
+                content: const Text(
+                  "Health Connect is not installed on this device. Would you like to download it from the Google Play Store to sync your fitness data?",
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.teal,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text("Download", style: TextStyle(color: Colors.white)),
+                  ),
+                ],
+              );
+            },
+          );
+
+          if (download == true) {
+            await HealthService.instance.installHealthConnect();
+          }
+          return;
+        }
+      }
+
+      final permissionGranted = await HealthService.instance.requestPermissions();
+      if (permissionGranted) {
+        await prefs.setBool('healthSetupCompleted', true);
+        setState(() {
+          _hcConnected = true;
+        });
+        
+        try {
+          await ApiService.instance.updateUserProfile({
+            "permissions": {
+              "health_connect_connected": true
+            }
+          });
+        } catch (e) {
+          debugPrint("Failed to sync Health Connect status with server: $e");
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("🎉 Connected to Health Connect successfully!"),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Permissions denied. Cannot connect to Health Connect."),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      }
+    } else {
+      await prefs.setBool('healthSetupCompleted', false);
+      setState(() {
+        _hcConnected = false;
+      });
+
+      try {
+        await ApiService.instance.updateUserProfile({
+          "permissions": {
+            "health_connect_connected": false
+          }
+        });
+      } catch (e) {
+        debugPrint("Failed to sync Health Connect status with server: $e");
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Health Connect integration disabled."),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _handleSignOut() async {
@@ -251,6 +639,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ],
                           ),
                         ),
+                        IconButton(
+                          icon: const Icon(Icons.edit_rounded, color: Colors.blueAccent, size: 24),
+                          onPressed: _showEditProfileDialog,
+                          tooltip: "Edit Profile",
+                        ),
                       ],
                     ),
                   ),
@@ -354,18 +747,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           icon: Icons.health_and_safety_outlined,
                           title: "Health Connect Integration",
                           subtitle: _hcConnected ? "Connected successfully" : "Setup missing",
-                          trailing: Icon(
-                            _hcConnected ? Icons.check_circle : Icons.warning_amber_rounded,
-                            color: _hcConnected ? Colors.green : Colors.orange,
-                            size: 20,
+                          trailing: Switch(
+                            value: _hcConnected,
+                            onChanged: _toggleHealthConnect,
+                            activeColor: Colors.tealAccent,
                           ),
                         ),
                         const Divider(height: 1, color: Colors.white10),
                         _buildSettingRow(
                           icon: Icons.notifications_none_outlined,
                           title: "Daily Reminders & Hydration",
-                          subtitle: "Enabled",
+                          subtitle: "Manage notification alerts",
                           trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const NotificationSettingsScreen(),
+                              ),
+                            ).then((_) {
+                              _loadProfileData();
+                            });
+                          },
+                        ),
+                        const Divider(height: 1, color: Colors.white10),
+                        _buildSettingRow(
+                          icon: Icons.color_lens_outlined,
+                          title: "Appearance Theme",
+                          subtitle: "Switch light, dark or system theme",
+                          trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+                          onTap: _showThemeSelectionDialog,
                         ),
                         const Divider(height: 1, color: Colors.white10),
                         _buildSettingRow(

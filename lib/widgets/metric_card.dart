@@ -144,10 +144,19 @@ class MetricCard extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
                 child: Center(
-                  child: Text(
-                    icon,
-                    style: const TextStyle(fontSize: 16),
-                  ),
+                  child: icon.startsWith('assets/')
+                      ? Image.asset(
+                          icon,
+                          width: 18,
+                          height: 18,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) =>
+                              const Text('•', style: TextStyle(fontSize: 16)),
+                        )
+                      : Text(
+                          icon,
+                          style: const TextStyle(fontSize: 16),
+                        ),
                 ),
               ),
               Expanded(

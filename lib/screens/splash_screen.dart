@@ -1,8 +1,7 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
-import '../widgets/glass_card.dart';
+import '../widgets/app_brand_logo.dart';
 import 'auth_screen.dart';
 import 'main_shell.dart';
 import 'onboarding_screen.dart';
@@ -15,7 +14,8 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<double> _scaleAnimation;
@@ -68,10 +68,14 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           final response = await AuthService.instance.refreshSessionToken();
           final user = response['user'];
           if (user != null) {
-            onboardingCompleted = user['onboarding_completed'] ?? onboardingCompleted;
+            onboardingCompleted =
+                user['onboarding_completed'] ?? onboardingCompleted;
             await prefs.setBool('onboarding_completed', onboardingCompleted);
             if (user['last_sync_date'] != null) {
-              await prefs.setString('last_sync_timestamp', user['last_sync_date']);
+              await prefs.setString(
+                'last_sync_timestamp',
+                user['last_sync_date'],
+              );
             }
           }
         } on AuthException catch (authError) {
@@ -80,7 +84,9 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           isLoggedIn = false;
           await AuthService.instance.signOut();
         } catch (networkError) {
-          print("Splash token refresh network error (offline mode): $networkError");
+          print(
+            "Splash token refresh network error (offline mode): $networkError",
+          );
           // Retain isLoggedIn = true and use local onboardingCompleted state since it's just a network/server failure
         }
       }
@@ -149,8 +155,16 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                   begin: Alignment.topRight,
                   end: Alignment.bottomLeft,
                   colors: isDark
-                      ? [const Color(0xFF0C0D11), const Color(0xFF0F1420), const Color(0xFF141926)]
-                      : [const Color(0xFFE0F2F1), const Color(0xFFE0F7FA), const Color(0xFFE3F2FD)],
+                      ? [
+                          const Color(0xFF0C0D11),
+                          const Color(0xFF0F1420),
+                          const Color(0xFF141926),
+                        ]
+                      : [
+                          const Color(0xFFE0F2F1),
+                          const Color(0xFFE0F7FA),
+                          const Color(0xFFE3F2FD),
+                        ],
                 ),
               ),
             ),
@@ -210,56 +224,20 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // App Logo wrapped in elegant glassmorphic container
-                  GlassCard(
-                    padding: const EdgeInsets.all(22),
-                    borderRadius: 28,
-                    margin: EdgeInsets.zero,
-                    child: Container(
-                      width: 90,
-                      height: 90,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.blueAccent.withOpacity(0.15),
-                            blurRadius: 18,
-                            spreadRadius: 2,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: Image.asset(
-                          'assets/app_logo.png',
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
+                  // Wide wordmark logo (white on transparent → dark plate)
+                  const AppBrandLogo.hero(),
+                  const SizedBox(height: 20),
 
-                  // Brand name with premium letter spacing
-                  Text(
-                    "arcahre wellness",
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.w900,
-                      color: isDark ? Colors.white : const Color(0xFF0F52BA),
-                      letterSpacing: -1.0,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Sub-branding
+                  // Tagline only — brand name is already in the logo art
                   Text(
                     "Optimize. Sync. Thrive.",
                     style: TextStyle(
                       fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: isDark ? Colors.grey[400] : const Color(0xFF556677),
-                      letterSpacing: 0.5,
+                      fontWeight: FontWeight.w600,
+                      color: isDark
+                          ? Colors.grey[400]
+                          : const Color(0xFF556677),
+                      letterSpacing: 0.6,
                     ),
                   ),
                   const SizedBox(height: 48),

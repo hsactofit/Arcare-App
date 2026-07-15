@@ -213,6 +213,96 @@ class ApiService {
     }
   }
 
+  // ── Hydration / Water API ──────────────────────────────────────
+
+  /// GET /api/water/logs/{email}
+  Future<Map<String, dynamic>> fetchWaterLogs(String email) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get('/api/water/logs/$encodedEmail');
+
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      throw Exception('Unexpected water logs response format');
+    }
+    throw Exception(
+        "Failed to load water logs: ${response.statusCode} - ${response.body}");
+  }
+
+  /// POST /api/water/log/{email}
+  /// body: { amount: int, timestamp?: ISO date-time }
+  Future<Map<String, dynamic>> addWaterLog(
+      String email, Map<String, dynamic> body) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response =
+        await _post('/api/water/log/$encodedEmail', body: body);
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      throw Exception('Unexpected add water log response format');
+    }
+    throw Exception(
+        "Failed to add water log: ${response.statusCode} - ${response.body}");
+  }
+
+  /// PUT /api/water/log/{logId}
+  Future<Map<String, dynamic>> updateWaterLog(
+      int logId, Map<String, dynamic> body) async {
+    final response = await _put('/api/water/log/$logId', body: body);
+
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      throw Exception('Unexpected update water log response format');
+    }
+    throw Exception(
+        "Failed to update water log: ${response.statusCode} - ${response.body}");
+  }
+
+  /// DELETE /api/water/log/{logId}
+  Future<void> deleteWaterLog(int logId) async {
+    final response = await _delete('/api/water/log/$logId');
+
+    if (response.statusCode != 200) {
+      throw Exception(
+          "Failed to delete water log: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// GET /api/water/graph/{email}?period=
+  /// period: day | week | month
+  Future<Map<String, dynamic>> fetchWaterGraph(
+      String email, String period) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final periodParam = switch (period.toLowerCase()) {
+      'days' || 'daily' => 'day',
+      'weeks' || 'weekly' => 'week',
+      'months' || 'monthly' => 'month',
+      _ => period.toLowerCase(),
+    };
+
+    final response = await _get(
+      '/api/water/graph/$encodedEmail',
+      queryParams: {'period': periodParam},
+    );
+
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      if (decoded is List) {
+        return {'period': periodParam, 'data': decoded};
+      }
+      throw Exception('Unexpected water graph response format');
+    }
+    throw Exception(
+        "Failed to load water graph: ${response.statusCode} - ${response.body}");
+  }
+
   // ── Nutrition API ──────────────────────────────────────────────
 
   /// GET /api/nutrition/logs/{email}
@@ -266,19 +356,383 @@ class ApiService {
   }
 
   /// GET /api/nutrition/graph/{email}?period=
+  /// period: day | week | month
   Future<Map<String, dynamic>> fetchNutritionGraph(
       String email, String period) async {
     final encodedEmail = Uri.encodeComponent(email);
+    // Normalize period aliases the backend might accept
+    final periodParam = switch (period.toLowerCase()) {
+      'days' || 'daily' => 'day',
+      'weeks' || 'weekly' => 'week',
+      'months' || 'monthly' => 'month',
+      _ => period.toLowerCase(),
+    };
+
     final response = await _get(
       '/api/nutrition/graph/$encodedEmail',
-      queryParams: {'period': period},
+      queryParams: {'period': periodParam},
     );
+
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+      // Unexpected list-only payload
+      if (decoded is List) {
+        return {'period': periodParam, 'data': decoded};
+      }
+      throw Exception('Unexpected nutrition graph response format');
+    } else {
+      throw Exception(
+          "Failed to load nutrition graph: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// GET /api/profile
+  Future<Map<String, dynamic>> fetchUserProfile() async {
+    final response = await _get('/api/profile');
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception("Failed to load user profile: ${response.statusCode}");
+    }
+  }
+
+  /// PUT /api/profile
+  Future<Map<String, dynamic>> updateUserProfile(Map<String, dynamic> body) async {
+    final response = await _put('/api/profile', body: body);
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception("Failed to update user profile: ${response.statusCode}");
+    }
+  }
+
+  /// POST /api/dashboard/sync/{email}
+  Future<Map<String, dynamic>> syncDashboard(String email, List<Map<String, dynamic>> dailyRecords) async {
+    final response = await _post('/api/dashboard/sync/${Uri.encodeComponent(email)}', body: dailyRecords);
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception("Failed to sync dashboard: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// GET /api/dashboard/{email}
+  Future<Map<String, dynamic>> getDashboard(String email) async {
+    final response = await _get('/api/dashboard/${Uri.encodeComponent(email)}');
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception("Failed to get dashboard: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  // ── SOS & Emergency API ────────────────────────────────────────
+
+  /// GET /api/sos/{email} — full SOS setup (contacts + emergency numbers)
+  Future<Map<String, dynamic>> getSos(String email) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get('/api/sos/$encodedEmail');
 
     if (response.statusCode == 200) {
       return Map<String, dynamic>.from(jsonDecode(response.body));
     } else {
       throw Exception(
-          "Failed to load nutrition graph: ${response.statusCode} - ${response.body}");
+          "Failed to load SOS data: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// GET /api/sos/contacts/{email}
+  Future<Map<String, dynamic>> listSosContacts(String email) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get('/api/sos/contacts/$encodedEmail');
+
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception(
+          "Failed to list SOS contacts: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// POST /api/sos/contacts/{email}
+  Future<Map<String, dynamic>> createSosContact(
+      String email, Map<String, dynamic> body) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response =
+        await _post('/api/sos/contacts/$encodedEmail', body: body);
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception(
+          "Failed to create SOS contact: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// PUT /api/sos/contacts/{contactId}
+  Future<Map<String, dynamic>> updateSosContact(
+      int contactId, Map<String, dynamic> body) async {
+    final response = await _put('/api/sos/contacts/$contactId', body: body);
+
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception(
+          "Failed to update SOS contact: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// DELETE /api/sos/contacts/{contactId}
+  Future<void> deleteSosContact(int contactId) async {
+    final response = await _delete('/api/sos/contacts/$contactId');
+
+    if (response.statusCode != 200) {
+      throw Exception(
+          "Failed to delete SOS contact: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// GET /api/sos/emergency/{email}
+  Future<Map<String, dynamic>> getEmergencyNumbers(String email) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get('/api/sos/emergency/$encodedEmail');
+
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception(
+          "Failed to load emergency numbers: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// PUT /api/sos/emergency/{email}
+  Future<Map<String, dynamic>> updateEmergencyNumbers(
+      String email, Map<String, dynamic> body) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response =
+        await _put('/api/sos/emergency/$encodedEmail', body: body);
+
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception(
+          "Failed to update emergency numbers: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// DELETE /api/sos/emergency/{email} — reset to defaults (112 / 102 / 101)
+  Future<Map<String, dynamic>> resetEmergencyNumbers(String email) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _delete('/api/sos/emergency/$encodedEmail');
+
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception(
+          "Failed to reset emergency numbers: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// POST /api/sos/trigger/{email}
+  Future<Map<String, dynamic>> triggerSos(
+    String email, {
+    double? latitude,
+    double? longitude,
+  }) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final body = <String, dynamic>{
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
+    };
+    final response =
+        await _post('/api/sos/trigger/$encodedEmail', body: body);
+
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception(
+          "Failed to trigger SOS: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  // ── Workout Plans API ──────────────────────────────────────────
+
+  /// GET /api/workout/{email}
+  Future<Map<String, dynamic>> listWorkoutPlans(String email) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get('/api/workout/$encodedEmail');
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Failed to list workout plans: ${response.statusCode} - ${response.body}");
+  }
+
+  /// POST /api/workout/{email}
+  Future<Map<String, dynamic>> createWorkoutPlan(
+      String email, Map<String, dynamic> body) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _post('/api/workout/$encodedEmail', body: body);
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Failed to create workout plan: ${response.statusCode} - ${response.body}");
+  }
+
+  /// POST /api/workout/generate/{email}
+  Future<Map<String, dynamic>> generateWorkoutPlan(
+      String email, Map<String, dynamic> body) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response =
+        await _post('/api/workout/generate/$encodedEmail', body: body);
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Failed to generate workout plan: ${response.statusCode} - ${response.body}");
+  }
+
+  /// GET /api/workout/{email}/day/{onDate}
+  Future<Map<String, dynamic>?> getWorkoutForDay(
+      String email, String onDate) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get('/api/workout/$encodedEmail/day/$onDate');
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    if (response.statusCode == 404) return null;
+    throw Exception(
+        "Failed to load workout for day: ${response.statusCode} - ${response.body}");
+  }
+
+  /// GET /api/workout/{email}/{planId}
+  Future<Map<String, dynamic>> getWorkoutPlan(
+      String email, int planId) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get('/api/workout/$encodedEmail/$planId');
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Failed to load workout plan: ${response.statusCode} - ${response.body}");
+  }
+
+  /// PUT /api/workout/{email}/{planId}
+  Future<Map<String, dynamic>> updateWorkoutPlan(
+      String email, int planId, Map<String, dynamic> body) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response =
+        await _put('/api/workout/$encodedEmail/$planId', body: body);
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Failed to update workout plan: ${response.statusCode} - ${response.body}");
+  }
+
+  /// DELETE /api/workout/{email}/{planId}
+  Future<void> deleteWorkoutPlan(String email, int planId) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _delete('/api/workout/$encodedEmail/$planId');
+    if (response.statusCode != 200) {
+      throw Exception(
+          "Failed to delete workout plan: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  // ── Nutrition Plans API ────────────────────────────────────────
+
+  /// GET /api/nutrition-plan/{email}
+  Future<Map<String, dynamic>> listNutritionPlans(String email) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get('/api/nutrition-plan/$encodedEmail');
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Failed to list nutrition plans: ${response.statusCode} - ${response.body}");
+  }
+
+  /// POST /api/nutrition-plan/{email}
+  Future<Map<String, dynamic>> createNutritionPlan(
+      String email, Map<String, dynamic> body) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response =
+        await _post('/api/nutrition-plan/$encodedEmail', body: body);
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Failed to create nutrition plan: ${response.statusCode} - ${response.body}");
+  }
+
+  /// POST /api/nutrition-plan/generate/{email}
+  Future<Map<String, dynamic>> generateNutritionPlan(
+      String email, Map<String, dynamic> body) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response =
+        await _post('/api/nutrition-plan/generate/$encodedEmail', body: body);
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Failed to generate nutrition plan: ${response.statusCode} - ${response.body}");
+  }
+
+  /// GET /api/nutrition-plan/{email}/day/{onDate}
+  Future<Map<String, dynamic>?> getNutritionForDay(
+      String email, String onDate) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response =
+        await _get('/api/nutrition-plan/$encodedEmail/day/$onDate');
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    if (response.statusCode == 404) return null;
+    throw Exception(
+        "Failed to load nutrition for day: ${response.statusCode} - ${response.body}");
+  }
+
+  /// GET /api/nutrition-plan/{email}/{planId}
+  Future<Map<String, dynamic>> getNutritionPlan(
+      String email, int planId) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get('/api/nutrition-plan/$encodedEmail/$planId');
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Failed to load nutrition plan: ${response.statusCode} - ${response.body}");
+  }
+
+  /// PUT /api/nutrition-plan/{email}/{planId}
+  Future<Map<String, dynamic>> updateNutritionPlan(
+      String email, int planId, Map<String, dynamic> body) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response =
+        await _put('/api/nutrition-plan/$encodedEmail/$planId', body: body);
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Failed to update nutrition plan: ${response.statusCode} - ${response.body}");
+  }
+
+  /// DELETE /api/nutrition-plan/{email}/{planId}
+  Future<void> deleteNutritionPlan(String email, int planId) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response =
+        await _delete('/api/nutrition-plan/$encodedEmail/$planId');
+    if (response.statusCode != 200) {
+      throw Exception(
+          "Failed to delete nutrition plan: ${response.statusCode} - ${response.body}");
     }
   }
 }

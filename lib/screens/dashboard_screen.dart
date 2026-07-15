@@ -22,6 +22,9 @@ import 'metric_detail_screen.dart';
 import 'gym_checkin_screen.dart';
 import 'challenges_screen.dart';
 import 'nutrition_logging_screen.dart';
+import 'sos_screen.dart';
+import 'plan_screen.dart';
+import '../models/plan_models.dart';
 import '../widgets/water/wave_painter.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -81,6 +84,10 @@ class DashboardScreenState extends State<DashboardScreen>
   List<Challenge> _activeChallenges = [];
 
   // Custom API metrics
+  double? _apiStepsValue;
+  double? _apiStepsTarget;
+  String? _apiStepsStatus;
+
   double? _apiCaloriesValue;
   double? _apiCaloriesTarget;
   String? _apiCaloriesStatus;
@@ -93,8 +100,34 @@ class DashboardScreenState extends State<DashboardScreen>
   double? _apiHeartRateTarget;
   String? _apiHeartRateStatus;
 
+  double? _apiWaterValue;
+  double? _apiWaterTarget;
+  String? _apiWaterStatus;
+
+  double? _apiNutritionCalories;
+  double? _apiCarbs;
+  double? _apiProtein;
+  double? _apiFat;
+
+  // Rewards & Challenges from API
+  String? _apiActiveChallengesValue;
+  String? _apiActiveChallengesStatus;
+  double? _apiRewardPoints;
+  double? _apiRewardTarget;
+  String? _apiRewardStatus;
+  String? _aiBuddyStatus;
+
   ScrollController? _activeGoalsScrollController;
   Timer? _activeGoalsScrollTimer;
+
+  // Today's personalized plans (day schedule snapshots)
+  TodayPlanSnapshot _todayWorkoutSnap = const TodayPlanSnapshot(
+    kind: PlanKind.workout,
+  );
+  TodayPlanSnapshot _todayNutritionSnap = const TodayPlanSnapshot(
+    kind: PlanKind.nutrition,
+  );
+  bool _plansLoading = false;
 
   @override
   void initState() {
@@ -226,13 +259,7 @@ class DashboardScreenState extends State<DashboardScreen>
   void _updateAutoScrollState() {
     if (!mounted) return;
 
-    final hasActiveGymChallenge = _activeChallenges.any(
-      (c) =>
-          c.metricType == 'workouts' ||
-          c.title.toLowerCase().contains('gym') ||
-          c.title.toLowerCase().contains('workout'),
-    );
-
+    // Gym lives in the top priority row; active goals only lists challenges.
     final isGymCompletedToday = _activeChallenges.any(
       (c) =>
           (c.metricType == 'workouts' ||
@@ -240,13 +267,6 @@ class DashboardScreenState extends State<DashboardScreen>
               c.title.toLowerCase().contains('workout')) &&
           c.completedToday,
     );
-
-    bool showGymCheckinCard = false;
-    if (_gymCheckedIn) {
-      showGymCheckinCard = true;
-    } else if (!isGymCompletedToday && hasActiveGymChallenge) {
-      showGymCheckinCard = true;
-    }
 
     final otherChallengesCount = _activeChallenges.where((c) {
       final isGym =
@@ -259,8 +279,7 @@ class DashboardScreenState extends State<DashboardScreen>
       return true;
     }).length;
 
-    final totalItems = (showGymCheckinCard ? 1 : 0) + otherChallengesCount;
-    _startActiveGoalsAutoScroll(totalItems);
+    _startActiveGoalsAutoScroll(otherChallengesCount);
   }
 
   void _startActiveGoalsAutoScroll(int itemCount) {
@@ -365,6 +384,11 @@ class DashboardScreenState extends State<DashboardScreen>
   }
 
   bool get _hasHealthData {
+    // API data counts as having data — so we don't show a "no data" state
+    // when the dashboard API has already returned widget values.
+    if (_serverWellnessScore != null) return true;
+    if (_apiStepsValue != null && _apiStepsValue! > 0) return true;
+    if (_apiCaloriesValue != null && _apiCaloriesValue! > 0) return true;
     return _healthData.steps > 0 ||
         _healthData.activeCalories > 0 ||
         _healthData.sleepDuration > 0 ||
@@ -604,57 +628,10 @@ class DashboardScreenState extends State<DashboardScreen>
           .fetchDailyHealthDataForPeriod(days: 7, forceRefresh: forceSync);
     });
     try {
-      // 1. Always load the active local Health Connect data to update the UI cards
-      var data = await HealthService.instance.fetchHealthData();
       final prefs = await SharedPreferences.getInstance();
 
-      final todayStr = DateTime.now().toIso8601String().substring(0, 10);
-      final savedNutriDate = prefs.getString('local_nutrition_date');
-      double cachedCal = 0.0;
-      double cachedCarbs = 0.0;
-      double cachedProtein = 0.0;
-      double cachedFat = 0.0;
-
-      if (savedNutriDate == todayStr) {
-        cachedCal = prefs.getDouble('cached_nutrition_calories') ?? 0.0;
-        cachedCarbs = prefs.getDouble('cached_nutrition_carbs') ?? 0.0;
-        cachedProtein = prefs.getDouble('cached_nutrition_protein') ?? 0.0;
-        cachedFat = prefs.getDouble('cached_nutrition_fat') ?? 0.0;
-      } else {
-        await prefs.setDouble('cached_nutrition_calories', 0.0);
-        await prefs.setDouble('cached_nutrition_carbs', 0.0);
-        await prefs.setDouble('cached_nutrition_protein', 0.0);
-        await prefs.setDouble('cached_nutrition_fat', 0.0);
-        await prefs.setString('local_nutrition_date', todayStr);
-      }
-
-      data = data.copyWith(
-        nutritionCalories: cachedCal,
-        carbs: cachedCarbs,
-        protein: cachedProtein,
-        fat: cachedFat,
-      );
-
+      // Set basic user info state before syncing from API
       setState(() {
-        _healthData = data;
-      });
-
-      // 2. Populate states from the local cache immediately for an instant load
-      setState(() {
-        _serverWellnessScore = prefs.getInt('cached_wellness_score');
-        _serverDailySummary = prefs.getString('cached_daily_summary');
-        _activeSubscore = prefs.getInt('cached_active_subscore');
-        _sleepSubscore = prefs.getInt('cached_sleep_subscore');
-        _nutritionSubscore = prefs.getInt('cached_nutrition_subscore');
-        _mindfulnessSubscore = prefs.getInt('cached_mindfulness_subscore');
-        final cachedRecs = prefs.getStringList('cached_recommendations');
-        if (cachedRecs != null) {
-          _serverRecommendations = cachedRecs;
-        }
-        final lastSyncedStr = prefs.getString('last_sync_timestamp');
-        if (lastSyncedStr != null) {
-          _lastSynced = DateTime.tryParse(lastSyncedStr);
-        }
         final localName = prefs.getString('user_name');
         if (localName != null && localName.isNotEmpty) {
           _userName = localName;
@@ -668,130 +645,66 @@ class DashboardScreenState extends State<DashboardScreen>
             }
           }
         }
+
         final jsonStr = prefs.getString('onboarding_data');
         if (jsonStr != null) {
           final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
           _userEmail = onboarding['auth']?['email'] ?? "";
         }
-
-        // Load custom API metrics or reset them at midnight
-        final savedMetricsDate = prefs.getString('cached_dashboard_metrics_date');
-        if (savedMetricsDate == todayStr) {
-          _apiCaloriesValue = prefs.getDouble('cached_calories_value');
-          _apiCaloriesTarget = prefs.getDouble('cached_calories_target');
-          _apiCaloriesStatus = prefs.getString('cached_calories_status');
-
-          _apiSleepValue = prefs.getDouble('cached_sleep_value');
-          _apiSleepTarget = prefs.getDouble('cached_sleep_target');
-          _apiSleepStatus = prefs.getString('cached_sleep_status');
-
-          _apiHeartRateValue = prefs.getDouble('cached_heart_rate_value');
-          _apiHeartRateTarget = prefs.getDouble('cached_heart_rate_target');
-          _apiHeartRateStatus = prefs.getString('cached_heart_rate_status');
-        } else {
-          _apiCaloriesValue = null;
-          _apiCaloriesTarget = null;
-          _apiCaloriesStatus = null;
-
-          _apiSleepValue = null;
-          _apiSleepTarget = null;
-          _apiSleepStatus = null;
-
-          _apiHeartRateValue = null;
-          _apiHeartRateTarget = null;
-          _apiHeartRateStatus = null;
-
-          prefs.remove('cached_calories_value');
-          prefs.remove('cached_calories_target');
-          prefs.remove('cached_calories_status');
-
-          prefs.remove('cached_sleep_value');
-          prefs.remove('cached_sleep_target');
-          prefs.remove('cached_sleep_status');
-
-          prefs.remove('cached_heart_rate_value');
-          prefs.remove('cached_heart_rate_target');
-          prefs.remove('cached_heart_rate_status');
-
-          prefs.setString('cached_dashboard_metrics_date', todayStr);
-        }
       });
 
-      // Fetch fresh nutrition from the API and update state/cache
-      if (_userEmail.isNotEmpty) {
+      // Fetch the dashboard sync data and update all UI state
+      final email = await ApiService.instance.getUserEmail();
+      if (email.isNotEmpty) {
+        List<Map<String, dynamic>> syncData = [];
         try {
-          final nutritionResult =
-              await ApiService.instance.fetchNutritionLogs(_userEmail);
-          final double apiCal =
-              (nutritionResult['calories_today'] as num?)?.toDouble() ?? 0.0;
-          final double apiCarbs =
-              (nutritionResult['carbs_today'] as num?)?.toDouble() ?? 0.0;
-          final double apiProtein =
-              (nutritionResult['protein_today'] as num?)?.toDouble() ?? 0.0;
-          final double apiFat =
-              (nutritionResult['fat_today'] as num?)?.toDouble() ?? 0.0;
-
-          setState(() {
-            _healthData = _healthData.copyWith(
-              nutritionCalories: apiCal,
-              carbs: apiCarbs,
-              protein: apiProtein,
-              fat: apiFat,
-            );
-          });
-
-          await prefs.setDouble('cached_nutrition_calories', apiCal);
-          await prefs.setDouble('cached_nutrition_carbs', apiCarbs);
-          await prefs.setDouble('cached_nutrition_protein', apiProtein);
-          await prefs.setDouble('cached_nutrition_fat', apiFat);
-          await prefs.setString('local_nutrition_date', todayStr);
+          syncData = await _dailyRecordsFuture!;
         } catch (e) {
-          debugPrint("Error fetching nutrition from API for dashboard: $e");
+          debugPrint(
+            "Failed to fetch daily records for sync. Proceeding with empty. Error: $e",
+          );
         }
-      }
-
-      await _fetchActiveChallenges();
-      await _loadGymState();
-
-      // 3. Determine if we should perform a backend synchronization
-      bool shouldSync = forceSync;
-      if (!shouldSync) {
-        if (_lastSynced == null) {
-          shouldSync = true;
-        } else {
-          final elapsed = DateTime.now().difference(_lastSynced!);
-          if (elapsed.inHours >= 2) {
-            shouldSync = true;
-          }
-        }
-      }
-
-      if (shouldSync) {
-        final jsonStr = prefs.getString('onboarding_data');
-        if (jsonStr != null) {
-          final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
-          final email = onboarding['auth']?['email'];
-          if (email != null) {
-            // Fetch daily health data for the last 7 days to sync to backend day-wise
-            final syncData = await _dailyRecordsFuture!;
-            await _syncAndRefreshDashboard(email, syncData);
-
-            // Re-load local health data so waterIntake from initializeWaterIntakeFromApi is mapped
-            final updatedData = await HealthService.instance.fetchHealthData();
-            setState(() {
-              _healthData = updatedData;
-            });
-          }
-        }
-      } else {
-        debugPrint(
-          "Auto-sync skipped: last sync was less than 2 hours ago (${_lastSynced != null ? DateTime.now().difference(_lastSynced!).inMinutes : 0} mins ago).",
-        );
+        await _syncAndRefreshDashboard(email, syncData);
+        await _fetchTodayPlans(email);
       }
     } catch (e) {
       debugPrint("Error in _fetchRealData combined flow: $e");
     } finally {
       setState(() => _isSyncing = false);
+    }
+  }
+
+  Future<void> _fetchTodayPlans(String email) async {
+    if (!mounted) return;
+    setState(() => _plansLoading = true);
+    final today = todayDateString();
+    try {
+      WorkoutDaySchedule? workoutDay;
+      NutritionDaySchedule? nutritionDay;
+
+      try {
+        final w = await ApiService.instance.getWorkoutForDay(email, today);
+        if (w != null) workoutDay = WorkoutDaySchedule.fromJson(w);
+      } catch (e) {
+        debugPrint("Today workout day: $e");
+      }
+
+      try {
+        final n = await ApiService.instance.getNutritionForDay(email, today);
+        if (n != null) nutritionDay = NutritionDaySchedule.fromJson(n);
+      } catch (e) {
+        debugPrint("Today nutrition day: $e");
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _todayWorkoutSnap = TodayPlanSnapshot.fromWorkout(workoutDay);
+        _todayNutritionSnap = TodayPlanSnapshot.fromNutrition(nutritionDay);
+        _plansLoading = false;
+      });
+    } catch (e) {
+      debugPrint("Error fetching today plans: $e");
+      if (mounted) setState(() => _plansLoading = false);
     }
   }
 
@@ -801,231 +714,249 @@ class DashboardScreenState extends State<DashboardScreen>
   ) async {
     final future = () async {
       try {
-        final token = await AuthService.instance.getAccessToken();
         final prefs = await SharedPreferences.getInstance();
 
-        // Combined Endpoint: Sync Health and retrieve complete dashboard metrics
-        final syncUrl =
-            '${AuthService.apiBaseUrl}/api/dashboard/sync/${Uri.encodeComponent(email)}';
-        final syncPayload = dailyRecords;
+        // 1. POST sync — uploads health data, returns score/summary/macros (NO widgets)
+        final syncRes = await ApiService.instance.syncDashboard(
+          email,
+          dailyRecords,
+        );
+        final syncData = Map<String, dynamic>.from(syncRes['data'] ?? syncRes);
 
-        // Debug log the full JSON payload
         debugPrint(
-          "================ MERGED HOME SYNC JSON PAYLOAD (LAST 7 DAYS DAILY) ================",
+          "✅ Sync POST done — score: ${syncData['wellness_score']}, water: ${syncData['water_intake_today']}",
         );
-        debugPrint(const JsonEncoder.withIndent('  ').convert(syncPayload));
+
+        // 2. GET dashboard — returns full DashboardResponse WITH widgets array
+        final dashRes = await ApiService.instance.getDashboard(email);
+        final resData = Map<String, dynamic>.from(dashRes['data'] ?? dashRes);
+
         debugPrint(
-          "===================================================================================",
+          "✅ GET Dashboard done — widgets count: ${(resData['widgets'] as List?)?.length ?? 0}",
+        );
+        debugPrint("Dashboard GET Response: ${jsonEncode(resData)}");
+
+        // ── Parse from GET /dashboard (has widgets + score + summary) ──────────
+        final int score =
+            resData['wellness_score'] ?? syncData['wellness_score'] ?? 0;
+        final String summary =
+            resData['daily_summary'] ?? syncData['daily_summary'] ?? "";
+        final List<String> recs = List<String>.from(
+          resData['recommendations'] ?? syncData['recommendations'] ?? [],
         );
 
-        final response = await http.post(
-          Uri.parse(syncUrl),
-          headers: {
-            'Content-Type': 'application/json',
-            if (token != null) 'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode(syncPayload),
-        );
+        // Subscores come from POST sync response
+        final int activeSub = syncData['active_subscore'] ?? 0;
+        final int sleepSub = syncData['sleep_subscore'] ?? 0;
+        final int nutriSub = syncData['nutrition_subscore'] ?? 0;
+        final int mindSub = syncData['mindfulness_subscore'] ?? 0;
 
-        // Debug log the full JSON response
+        // Nutrition macros (top-level fields)
+        final double apiProtein =
+            (resData['protein_today'] as num?)?.toDouble() ?? 0.0;
+        final double apiCarbs =
+            (resData['carbs_today'] as num?)?.toDouble() ?? 0.0;
+        final double apiFat = (resData['fat_today'] as num?)?.toDouble() ?? 0.0;
+        final double apiNutriCal = apiProtein * 4 + apiCarbs * 4 + apiFat * 9;
+
+        // ── Parse widgets[] array ─────────────────────────────────────────────
+        final List<dynamic> widgetsData = resData['widgets'] ?? [];
         debugPrint(
-          "================ MERGED HOME SYNC API RESPONSE ================",
-        );
-        debugPrint("Status Code: ${response.statusCode}");
-        debugPrint("Response Body: ${response.body}");
-        debugPrint(
-          "=================================================================",
+          "🔍 widgetsData count: ${widgetsData.length}, titles: ${widgetsData.map((w) => (w as Map)['title']).toList()}",
         );
 
-        if (response.statusCode == 200) {
-          final resData = jsonDecode(response.body);
-          final int score = resData['wellness_score'] ?? 75;
-          final String summary = resData['daily_summary'] ?? "";
-          final List<String> recs = List<String>.from(
-            resData['recommendations'] ?? [],
-          );
-          final String buddyMsg =
-              resData['ai_buddy_message'] ?? "Hi! I am your AI Buddy.";
-          final int activeSub = resData['active_subscore'] ?? 0;
-          final int sleepSub = resData['sleep_subscore'] ?? 0;
-          final int nutriSub = resData['nutrition_subscore'] ?? 0;
-          final int mindSub = resData['mindfulness_subscore'] ?? 0;
-          final int apiWaterToday = resData['water_intake_today'] ?? 0;
-
-          await HealthService.instance.initializeWaterIntakeFromApi(
-            apiWaterToday.toDouble(),
-          );
-
-          // Extract & Initialize Nutrition macros from dashboard sync response
-          final double apiProtein = (resData['protein_today'] as num?)?.toDouble() ?? 0.0;
-          final double apiCarbs = (resData['carbs_today'] as num?)?.toDouble() ?? 0.0;
-          final double apiFat = (resData['fat_today'] as num?)?.toDouble() ?? 0.0;
-          final double apiNutriCal = (resData['calories_today'] as num?)?.toDouble() ?? (apiProtein * 4 + apiCarbs * 4 + apiFat * 9);
-
-          await HealthService.instance.initializeNutritionFromApi(
-            apiProtein: apiProtein,
-            apiCarbs: apiCarbs,
-            apiFat: apiFat,
-            apiCalories: apiNutriCal,
-          );
-
-          // Parse Custom API Metrics (Calories Burned, Sleep, Heart Rate) from widgets list
-          double? parsedCalVal;
-          double? parsedCalTarget;
-          String? parsedCalStatus;
-
-          double? parsedSleepVal;
-          double? parsedSleepTarget;
-          String? parsedSleepStatus;
-
-          double? parsedHeartVal;
-          double? parsedHeartTarget;
-          String? parsedHeartStatus;
-
-          final List<dynamic> widgetsData = resData['widgets'] ?? [];
-
-          // Calories Burned
-          final calWidget = widgetsData.firstWhere(
-            (w) => w['title'] == 'Calories Burned',
-            orElse: () => null,
-          );
-          if (calWidget != null) {
-            parsedCalVal = double.tryParse(calWidget['value']?.toString() ?? '');
-            parsedCalTarget = double.tryParse(calWidget['target']?.toString() ?? '');
-            parsedCalStatus = calWidget['status']?.toString();
-          } else {
-            parsedCalVal = (resData['calories_burned_today'] ?? resData['calories_today'] ?? resData['active_calories'])?.toDouble();
-            parsedCalTarget = (resData['calories_target'] ?? resData['calorie_goal'])?.toDouble();
-            parsedCalStatus = resData['calories_status']?.toString();
-          }
-
-          // Sleep Duration
-          final sleepWidget = widgetsData.firstWhere(
-            (w) => w['title'] == 'Sleep Duration',
-            orElse: () => null,
-          );
-          if (sleepWidget != null) {
-            parsedSleepVal = double.tryParse(sleepWidget['value']?.toString() ?? '');
-            parsedSleepTarget = double.tryParse(sleepWidget['target']?.toString() ?? '');
-            parsedSleepStatus = sleepWidget['status']?.toString();
-          } else {
-            parsedSleepVal = (resData['sleep_today'] ?? resData['sleep_hours'] ?? resData['sleep_duration'])?.toDouble();
-            parsedSleepTarget = (resData['sleep_target'] ?? resData['sleep_goal'])?.toDouble();
-            parsedSleepStatus = resData['sleep_status']?.toString();
-          }
-
-          // Heart Rate
-          final hrWidget = widgetsData.firstWhere(
-            (w) => w['title'] == 'Heart Rate',
-            orElse: () => null,
-          );
-          if (hrWidget != null) {
-            parsedHeartVal = double.tryParse(hrWidget['value']?.toString() ?? '');
-            parsedHeartStatus = hrWidget['status']?.toString();
-            final targetStr = hrWidget['target']?.toString() ?? '';
-            if (targetStr.contains('-')) {
-              parsedHeartTarget = double.tryParse(targetStr.split('-')[0]);
-            } else {
-              parsedHeartTarget = double.tryParse(targetStr);
-            }
-          } else {
-            parsedHeartVal = (resData['heart_rate_today'] ?? resData['heart_rate_bpm'] ?? resData['pulse'])?.toDouble();
-            parsedHeartTarget = (resData['heart_rate_target'] ?? resData['heart_rate_goal'])?.toDouble();
-            parsedHeartStatus = resData['heart_rate_status']?.toString();
-          }
-
-          // Parse and Sync gym session from API response
-          if (resData['latest_gym_session'] != null) {
-            final gym = resData['latest_gym_session'];
-            final checkInTimeStr = gym['check_in_time']?.toString();
-            final checkOutTimeStr = gym['check_out_time']?.toString();
-            final gymName = gym['gym_name']?.toString() ?? "Gold's Gym";
-            final gymId = gym['id']?.toString() ?? "";
-
-            if (checkOutTimeStr == null || checkOutTimeStr.isEmpty) {
-              await prefs.setBool('gym_checked_in', true);
-              await prefs.setString('gym_name', gymName);
-              await prefs.setString('gym_place', gymName);
-              if (checkInTimeStr != null) {
-                await prefs.setString('gym_check_in_time', checkInTimeStr);
+        // Type-safe helper to find a widget by title
+        Map<String, dynamic>? findWidget(String title) {
+          for (final item in widgetsData) {
+            if (item is Map) {
+              final t = item['title']?.toString() ?? '';
+              if (t == title) {
+                return Map<String, dynamic>.from(item);
               }
-              await prefs.setString('gym_session_id', gymId);
-              await prefs.remove('gym_check_out_time');
-            } else {
-              await prefs.remove('gym_checked_in');
-              await prefs.remove('gym_name');
-              await prefs.remove('gym_place');
-              await prefs.remove('gym_check_in_time');
-              await prefs.remove('gym_session_id');
-              await prefs.remove('gym_logged_exercises');
-              
-              await prefs.setString('gym_check_out_time', checkOutTimeStr);
-              final checkOutDate = checkOutTimeStr.substring(0, 10);
-              await prefs.setString('gym_done_today_date', checkOutDate);
             }
-            await _loadGymState();
           }
-
-          setState(() {
-            _apiCaloriesValue = parsedCalVal;
-            _apiCaloriesTarget = parsedCalTarget;
-            _apiCaloriesStatus = parsedCalStatus;
-
-            _apiSleepValue = parsedSleepVal;
-            _apiSleepTarget = parsedSleepTarget;
-            _apiSleepStatus = parsedSleepStatus;
-
-            _apiHeartRateValue = parsedHeartVal;
-            _apiHeartRateTarget = parsedHeartTarget;
-            _apiHeartRateStatus = parsedHeartStatus;
-
-            _serverWellnessScore = score;
-            _serverDailySummary = summary;
-            _serverRecommendations = recs;
-            _activeSubscore = activeSub;
-            _sleepSubscore = sleepSub;
-            _nutritionSubscore = nutriSub;
-            _mindfulnessSubscore = mindSub;
-            _lastSynced = DateTime.now();
-          });
-
-          // Save to SharedPreferences cache
-          await prefs.setInt('cached_wellness_score', score);
-          await prefs.setInt('cached_active_subscore', activeSub);
-          await prefs.setInt('cached_sleep_subscore', sleepSub);
-          await prefs.setInt('cached_nutrition_subscore', nutriSub);
-          await prefs.setInt('cached_mindfulness_subscore', mindSub);
-          await prefs.setString('cached_daily_summary', summary);
-          await prefs.setStringList('cached_recommendations', recs);
-          await prefs.setString('cached_ai_buddy_message', buddyMsg);
-          await prefs.setString(
-            'last_sync_timestamp',
-            _lastSynced!.toIso8601String(),
-          );
-
-          // Save custom metrics to persistent cache
-          final todayStr = DateTime.now().toIso8601String().substring(0, 10);
-          await prefs.setString('cached_dashboard_metrics_date', todayStr);
-          if (_apiCaloriesValue != null) await prefs.setDouble('cached_calories_value', _apiCaloriesValue!);
-          if (_apiCaloriesTarget != null) await prefs.setDouble('cached_calories_target', _apiCaloriesTarget!);
-          if (_apiCaloriesStatus != null) await prefs.setString('cached_calories_status', _apiCaloriesStatus!);
-
-          if (_apiSleepValue != null) await prefs.setDouble('cached_sleep_value', _apiSleepValue!);
-          if (_apiSleepTarget != null) await prefs.setDouble('cached_sleep_target', _apiSleepTarget!);
-          if (_apiSleepStatus != null) await prefs.setString('cached_sleep_status', _apiSleepStatus!);
-
-          if (_apiHeartRateValue != null) await prefs.setDouble('cached_heart_rate_value', _apiHeartRateValue!);
-          if (_apiHeartRateTarget != null) await prefs.setDouble('cached_heart_rate_target', _apiHeartRateTarget!);
-          if (_apiHeartRateStatus != null) await prefs.setString('cached_heart_rate_status', _apiHeartRateStatus!);
-
-          debugPrint(
-            "Successfully executed merged sync and updated local dashboard cache.",
-          );
-        } else {
-          debugPrint(
-            "Failed to execute merged sync: ${response.statusCode} - ${response.body}",
-          );
+          return null;
         }
+
+        // Daily Steps
+        double? parsedStepsVal;
+        double? parsedStepsTarget;
+        String? parsedStepsStatus;
+        final stepsW = findWidget('Daily Steps');
+
+        if (stepsW != null) {
+          parsedStepsVal = double.tryParse(stepsW['value']?.toString() ?? '');
+          parsedStepsTarget = double.tryParse(
+            stepsW['target']?.toString() ?? '',
+          );
+          parsedStepsStatus = stepsW['status']?.toString();
+        }
+
+        // Calories Burned
+        double? parsedCalVal;
+        double? parsedCalTarget;
+        String? parsedCalStatus;
+        final calW = findWidget('Calories Burned');
+        if (calW != null) {
+          parsedCalVal = double.tryParse(calW['value']?.toString() ?? '');
+          parsedCalTarget = double.tryParse(calW['target']?.toString() ?? '');
+          parsedCalStatus = calW['status']?.toString();
+        }
+
+        // Sleep Duration
+        double? parsedSleepVal;
+        double? parsedSleepTarget;
+        String? parsedSleepStatus;
+        final sleepW = findWidget('Sleep Duration');
+        if (sleepW != null) {
+          parsedSleepVal = double.tryParse(sleepW['value']?.toString() ?? '');
+          parsedSleepTarget = double.tryParse(
+            sleepW['target']?.toString() ?? '',
+          );
+          parsedSleepStatus = sleepW['status']?.toString();
+        }
+
+        // Water Intake
+        double? parsedWaterVal;
+        double? parsedWaterTarget;
+        String? parsedWaterStatus;
+        final waterW = findWidget('Water Intake');
+        if (waterW != null) {
+          parsedWaterVal = double.tryParse(waterW['value']?.toString() ?? '');
+          parsedWaterTarget = double.tryParse(
+            waterW['target']?.toString() ?? '',
+          );
+          parsedWaterStatus = waterW['status']?.toString();
+        } else {
+          parsedWaterVal = (resData['water_intake_today'] as num?)?.toDouble();
+        }
+
+        // Heart Rate
+        double? parsedHeartVal;
+        double? parsedHeartTarget;
+        String? parsedHeartStatus;
+        final hrW = findWidget('Heart Rate');
+        if (hrW != null) {
+          parsedHeartVal = double.tryParse(hrW['value']?.toString() ?? '');
+          parsedHeartStatus = hrW['status']?.toString();
+          final tgt = hrW['target']?.toString() ?? '';
+          parsedHeartTarget = tgt.contains('-')
+              ? double.tryParse(tgt.split('-')[0])
+              : double.tryParse(tgt);
+        }
+
+        // Active Challenges
+        String? parsedChallengesVal;
+        String? parsedChallengesStatus;
+        final chalW = findWidget('Active Challenges');
+        if (chalW != null) {
+          parsedChallengesVal = chalW['value']?.toString();
+          parsedChallengesStatus = chalW['status']?.toString();
+        }
+
+        // Rewards Points
+        double? parsedRewardPoints;
+        double? parsedRewardTarget;
+        String? parsedRewardStatus;
+        final rewardW = findWidget('Rewards Points');
+        if (rewardW != null) {
+          parsedRewardPoints = double.tryParse(
+            rewardW['value']?.toString() ?? '',
+          );
+          parsedRewardTarget = double.tryParse(
+            rewardW['target']?.toString() ?? '',
+          );
+          parsedRewardStatus = rewardW['status']?.toString();
+        }
+
+        // AI Wellness Buddy
+        String? parsedBuddyStatus;
+        final buddyW = findWidget('AI Wellness Buddy');
+        if (buddyW != null) {
+          parsedBuddyStatus = buddyW['status']?.toString();
+        }
+
+        // ── Parse gym session from API response ───────────────────────────────
+        if (resData['latest_gym_session'] != null) {
+          final gym = resData['latest_gym_session'];
+          final checkInTimeStr = gym['check_in_time']?.toString();
+          final checkOutTimeStr = gym['check_out_time']?.toString();
+          final gymName = gym['gym_name']?.toString() ?? "Gym";
+          final gymId = gym['id']?.toString() ?? "";
+
+          if (checkOutTimeStr == null || checkOutTimeStr.isEmpty) {
+            await prefs.setBool('gym_checked_in', true);
+            await prefs.setString('gym_name', gymName);
+            await prefs.setString('gym_place', gymName);
+            if (checkInTimeStr != null) {
+              await prefs.setString('gym_check_in_time', checkInTimeStr);
+            }
+            await prefs.setString('gym_session_id', gymId);
+            await prefs.remove('gym_check_out_time');
+          } else {
+            await prefs.remove('gym_checked_in');
+            await prefs.remove('gym_name');
+            await prefs.remove('gym_place');
+            await prefs.remove('gym_check_in_time');
+            await prefs.remove('gym_session_id');
+            await prefs.remove('gym_logged_exercises');
+            await prefs.setString('gym_check_out_time', checkOutTimeStr);
+            final checkOutDate = checkOutTimeStr.substring(0, 10);
+            await prefs.setString('gym_done_today_date', checkOutDate);
+          }
+          await _loadGymState();
+        }
+
+        // ── Commit all API data to state ──────────────────────────────────────
+        setState(() {
+          _serverWellnessScore = score;
+          _serverDailySummary = summary;
+          _serverRecommendations = recs;
+          _activeSubscore = activeSub;
+          _sleepSubscore = sleepSub;
+          _nutritionSubscore = nutriSub;
+          _mindfulnessSubscore = mindSub;
+          _lastSynced = DateTime.now();
+
+          // Metric widgets
+          _apiStepsValue = parsedStepsVal;
+          _apiStepsTarget = parsedStepsTarget;
+          _apiStepsStatus = parsedStepsStatus;
+
+          _apiCaloriesValue = parsedCalVal;
+          _apiCaloriesTarget = parsedCalTarget;
+          _apiCaloriesStatus = parsedCalStatus;
+
+          _apiSleepValue = parsedSleepVal;
+          _apiSleepTarget = parsedSleepTarget;
+          _apiSleepStatus = parsedSleepStatus;
+
+          _apiHeartRateValue = parsedHeartVal;
+          _apiHeartRateTarget = parsedHeartTarget;
+          _apiHeartRateStatus = parsedHeartStatus;
+
+          _apiWaterValue = parsedWaterVal;
+          _apiWaterTarget = parsedWaterTarget;
+          _apiWaterStatus = parsedWaterStatus;
+
+          // Nutrition macros
+          _apiNutritionCalories = apiNutriCal;
+          _apiCarbs = apiCarbs;
+          _apiProtein = apiProtein;
+          _apiFat = apiFat;
+
+          // Challenges & Rewards & AI Buddy
+          _apiActiveChallengesValue = parsedChallengesVal;
+          _apiActiveChallengesStatus = parsedChallengesStatus;
+          _apiRewardPoints = parsedRewardPoints;
+          _apiRewardTarget = parsedRewardTarget;
+          _apiRewardStatus = parsedRewardStatus;
+          _aiBuddyStatus = parsedBuddyStatus;
+        });
+
+        debugPrint(
+          "✅ Dashboard synced — score: $score, steps: $parsedStepsVal, calories: $parsedCalVal, sleep: $parsedSleepVal, water: $parsedWaterVal, rewards: $parsedRewardPoints, challenges: $parsedChallengesVal",
+        );
       } catch (e) {
         debugPrint("Error in _syncAndRefreshDashboard combined flow: $e");
       }
@@ -2496,58 +2427,82 @@ class DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildRewardsCard(ThemeData theme, bool isDark) {
+    final int points = _apiRewardPoints?.round() ?? 0;
+    final int target = _apiRewardTarget?.round() ?? 500;
+    final String tier = _apiRewardStatus ?? "Bronze Tier";
+    final double progress = (points / target).clamp(0.0, 1.0);
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: GlassCard(
         padding: const EdgeInsets.all(20),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text("🎁", style: TextStyle(fontSize: 28)),
-                const SizedBox(width: 12),
+                Row(
+                  children: [
+                    const Text("🎁", style: TextStyle(fontSize: 28)),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Your Rewards",
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        Text(
+                          tier,
+                          style: TextStyle(
+                            color: isDark
+                                ? Colors.amber[300]
+                                : Colors.amber[700],
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
                 Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      "Your Rewards Status",
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
+                      "$points pts",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 18,
+                        color: Colors.amber,
                       ),
                     ),
-                    const SizedBox(height: 2),
                     Text(
-                      "Earn points to unlock digital vouchers.",
+                      "of $target pts",
                       style: TextStyle(
-                        color: isDark ? Colors.grey[400] : Colors.grey[600],
-                        fontSize: 12,
+                        color: isDark ? Colors.white60 : Colors.black54,
+                        fontSize: 11,
                       ),
                     ),
                   ],
                 ),
               ],
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                const Text(
-                  "1,240 pts",
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 18,
-                    color: Colors.amber,
-                  ),
-                ),
-                Text(
-                  "Level 3 Silver",
-                  style: TextStyle(
-                    color: isDark ? Colors.white60 : Colors.black54,
-                    fontSize: 11,
-                  ),
-                ),
-              ],
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 6,
+                backgroundColor: isDark
+                    ? Colors.white10
+                    : Colors.black.withOpacity(0.06),
+                valueColor: const AlwaysStoppedAnimation<Color>(Colors.amber),
+              ),
             ),
           ],
         ),
@@ -2640,7 +2595,9 @@ class DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildWaterIntakeSliver(ThemeData theme, bool isDark) {
-    final progress = (_healthData.waterIntake / _waterGoal).clamp(0.0, 1.0);
+    final double currentWater = _apiWaterValue ?? _healthData.waterIntake;
+    final double targetWater = _apiWaterTarget ?? _waterGoal;
+    final progress = (currentWater / targetWater).clamp(0.0, 1.0);
     return SliverToBoxAdapter(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2685,7 +2642,7 @@ class DashboardScreenState extends State<DashboardScreen>
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    "${_healthData.waterIntake.round()} / ${_waterGoal.round()} ml",
+                    "${currentWater.round()} / ${targetWater.round()} ml",
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 15,
@@ -2849,25 +2806,34 @@ class DashboardScreenState extends State<DashboardScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
+                Row(
                   children: [
-                    Text("🍎", style: TextStyle(fontSize: 28)),
-                    SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "Nutrition Summary",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: _metricAssetIcon(
+                        'assets/nutrition_summary.png',
+                        size: 48,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Nutrition Summary",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                            ),
                           ),
-                        ),
-                        Text(
-                          "Today's macros and intake",
-                          style: TextStyle(color: Colors.grey, fontSize: 12),
-                        ),
-                      ],
+                          Text(
+                            "Today's macros and intake",
+                            style: TextStyle(color: Colors.grey, fontSize: 12),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -2880,7 +2846,7 @@ class DashboardScreenState extends State<DashboardScreen>
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     Text(
-                      "${_healthData.nutritionCalories.round()} kcal",
+                      "${(_apiNutritionCalories ?? 0).round()} kcal",
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                   ],
@@ -2890,17 +2856,17 @@ class DashboardScreenState extends State<DashboardScreen>
                   children: [
                     _macroElement(
                       "Carbs",
-                      "${_healthData.carbs.round()}g",
+                      "${(_apiCarbs ?? 0).round()}g",
                       Colors.blue,
                     ),
                     _macroElement(
                       "Protein",
-                      "${_healthData.protein.round()}g",
+                      "${(_apiProtein ?? 0).round()}g",
                       Colors.green,
                     ),
                     _macroElement(
                       "Fat",
-                      "${_healthData.fat.round()}g",
+                      "${(_apiFat ?? 0).round()}g",
                       Colors.orange,
                     ),
                   ],
@@ -3153,6 +3119,25 @@ class DashboardScreenState extends State<DashboardScreen>
     });
   }
 
+  /// Shared metric icon from assets (steps, calories, heart, sleep, nutrition).
+  Widget _metricAssetIcon(
+    String assetPath, {
+    double size = 22,
+    BoxFit fit = BoxFit.contain,
+  }) {
+    return Image.asset(
+      assetPath,
+      width: size,
+      height: size,
+      fit: fit,
+      errorBuilder: (_, __, ___) => Icon(
+        Icons.image_not_supported_outlined,
+        size: size * 0.85,
+        color: Colors.grey,
+      ),
+    );
+  }
+
   Widget _buildStepsCard(
     bool isDark,
     double steps,
@@ -3203,8 +3188,8 @@ class DashboardScreenState extends State<DashboardScreen>
               children: [
                 Row(
                   children: [
-                    const Text("👣", style: TextStyle(fontSize: 16)),
-                    const SizedBox(width: 6),
+                    _metricAssetIcon('assets/steps.png', size: 22),
+                    const SizedBox(width: 8),
                     Text(
                       "STEPS",
                       style: TextStyle(
@@ -3327,8 +3312,8 @@ class DashboardScreenState extends State<DashboardScreen>
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Text("❤️", style: TextStyle(fontSize: 18)),
-                              const SizedBox(height: 5),
+                              _metricAssetIcon('assets/heart.png', size: 26),
+                              const SizedBox(height: 4),
                               Text(
                                 bpm > 0 ? bpm.round().toString() : "--",
                                 style: TextStyle(
@@ -3452,8 +3437,8 @@ class DashboardScreenState extends State<DashboardScreen>
               children: [
                 Row(
                   children: [
-                    const Text("🔥", style: TextStyle(fontSize: 16)),
-                    const SizedBox(width: 6),
+                    _metricAssetIcon('assets/calories_burn.png', size: 24),
+                    const SizedBox(width: 8),
                     Text(
                       "Calories",
                       style: TextStyle(
@@ -3492,21 +3477,28 @@ class DashboardScreenState extends State<DashboardScreen>
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      "Goal: ${goal.round()}",
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFFE08200),
+                    Flexible(
+                      child: Text(
+                        "Goal: ${goal.round()}",
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFFE08200),
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     if (status != null && status.isNotEmpty)
-                      Text(
-                        status,
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w900,
-                          color: isDark ? Colors.white60 : Colors.black54,
+                      Flexible(
+                        child: Text(
+                          status,
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w900,
+                            color: isDark ? Colors.white60 : Colors.black54,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.end,
                         ),
                       ),
                   ],
@@ -3573,8 +3565,8 @@ class DashboardScreenState extends State<DashboardScreen>
                     children: [
                       Row(
                         children: [
-                          const Text("🌙", style: TextStyle(fontSize: 14)),
-                          const SizedBox(width: 5),
+                          _metricAssetIcon('assets/sleep.png', size: 22),
+                          const SizedBox(width: 7),
                           const Text(
                             "SLEEP",
                             style: TextStyle(
@@ -3628,7 +3620,9 @@ class DashboardScreenState extends State<DashboardScreen>
                                 style: TextStyle(
                                   fontSize: 10.5,
                                   fontWeight: FontWeight.bold,
-                                  color: isDark ? Colors.white60 : Colors.black54,
+                                  color: isDark
+                                      ? Colors.white60
+                                      : Colors.black54,
                                 ),
                                 overflow: TextOverflow.ellipsis,
                                 textAlign: TextAlign.end,
@@ -3743,15 +3737,20 @@ class DashboardScreenState extends State<DashboardScreen>
                   parent: BouncingScrollPhysics(),
                 ),
                 slivers: [
-                  // Header (Greeting, Profile, Notification Icon)
+                  // 1. Header (Greeting, Profile, Notification Icon)
                   _buildHeader(theme, isDark),
 
-                  // Active challenges actions row
+                  // 2. Top priority: SOS + Gym Check-in
+                  SliverToBoxAdapter(
+                    child: _buildTopPriorityActions(theme, isDark),
+                  ),
+
+                  // 3. Active goals
                   SliverToBoxAdapter(
                     child: _buildActiveChallengesRow(theme, isDark),
                   ),
 
-                  // Health Connect status banner at the top
+                  // Health Connect status banner
                   if (!_isConnected)
                     SliverToBoxAdapter(
                       child: _healthConnectRequested
@@ -3773,6 +3772,11 @@ class DashboardScreenState extends State<DashboardScreen>
                   // Main Wellness & Score Card
                   SliverToBoxAdapter(
                     child: _buildWellnessScoreCard(theme, isDark),
+                  ),
+
+                  // Today's Workout + Nutrition plans (morph cards)
+                  SliverToBoxAdapter(
+                    child: _buildTodayPlansSection(theme, isDark),
                   ),
 
                   // Face Scan Banner
@@ -3799,12 +3803,12 @@ class DashboardScreenState extends State<DashboardScreen>
                                 flex: 3,
                                 child: _buildStepsCard(
                                   isDark,
-                                  _healthData.steps,
-                                  _stepGoal,
+                                  _apiStepsValue ?? _healthData.steps,
+                                  _apiStepsTarget ?? _stepGoal,
                                   () => _navigateToMetricDetail(
                                     'steps',
                                     'Steps',
-                                    '👣',
+                                    'assets/steps.png',
                                     const Color(0xFF006D56),
                                   ),
                                 ),
@@ -3823,7 +3827,7 @@ class DashboardScreenState extends State<DashboardScreen>
                                   () => _navigateToMetricDetail(
                                     'heart_rate',
                                     'Heart Rate',
-                                    '❤️',
+                                    'assets/heart.png',
                                     const Color(0xFFC72C3A),
                                   ),
                                 ),
@@ -3838,13 +3842,14 @@ class DashboardScreenState extends State<DashboardScreen>
                                 flex: 2,
                                 child: _buildCaloriesCard(
                                   isDark,
-                                  _apiCaloriesValue ?? _healthData.activeCalories,
+                                  _apiCaloriesValue ??
+                                      _healthData.activeCalories,
                                   _apiCaloriesTarget ?? _calorieGoal,
                                   _apiCaloriesStatus,
                                   () => _navigateToMetricDetail(
                                     'calories',
                                     'Calories',
-                                    '🔥',
+                                    'assets/calories_burn.png',
                                     const Color(0xFFE08200),
                                   ),
                                 ),
@@ -3860,7 +3865,7 @@ class DashboardScreenState extends State<DashboardScreen>
                                   () => _navigateToMetricDetail(
                                     'sleep',
                                     'Sleep',
-                                    '🌙',
+                                    'assets/sleep.png',
                                     const Color(0xFF5A5AE6),
                                   ),
                                 ),
@@ -3872,26 +3877,26 @@ class DashboardScreenState extends State<DashboardScreen>
                     ),
                   ),
 
+                  // AI Health Buddy Card
+                  SliverToBoxAdapter(
+                    child: _buildAIRecommendationCard(theme, isDark),
+                  ),
+
                   // Water Intake Section
                   _buildWaterIntakeSliver(theme, isDark),
 
                   // Nutrition Section
                   _buildNutritionSliver(theme, isDark),
 
-                  // AI Health Buddy Card
-                  SliverToBoxAdapter(
-                    child: _buildAIRecommendationCard(theme, isDark),
-                  ),
-
                   // Today's Plan Section
-                  SliverToBoxAdapter(
-                    child: _buildTodaysPlanSection(theme, isDark),
-                  ),
+                  // SliverToBoxAdapter(
+                  //   child: _buildTodaysPlanSection(theme, isDark),
+                  // ),
 
                   // Quick Access Section
-                  SliverToBoxAdapter(
-                    child: _buildQuickAccessSection(theme, isDark),
-                  ),
+                  // SliverToBoxAdapter(
+                  //   child: _buildQuickAccessSection(theme, isDark),
+                  // ),
 
                   // Active Challenge Card
                   // SliverToBoxAdapter(
@@ -4038,6 +4043,257 @@ class DashboardScreenState extends State<DashboardScreen>
       const SnackBar(
         content: Text("Medical records access authorized!"),
         backgroundColor: Colors.green,
+      ),
+    );
+  }
+
+  Widget _buildTodayPlansSection(ThemeData theme, bool isDark) {
+    final labelColor = isDark ? Colors.white60 : Colors.black54;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 10, right: 4),
+            child: Row(
+              children: [
+                Text(
+                  "TODAY'S PLANS",
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    color: labelColor,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const Spacer(),
+                if (_plansLoading)
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: _buildHomePlanCard(
+                  isDark: isDark,
+                  textColor: textColor,
+                  secondary: labelColor,
+                  accent: const Color(0xFF5B8CFF),
+                  emoji: '💪',
+                  kindLabel: 'WORKOUT',
+                  snap: _todayWorkoutSnap,
+                  emptyTitle: 'Build workout',
+                  emptySubtitle: 'AI plan for your week',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PlanScreen(
+                          kind: PlanKind.workout,
+                          onPlanChanged: () {
+                            ApiService.instance.getUserEmail().then(
+                              (email) => _fetchTodayPlans(email),
+                            );
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildHomePlanCard(
+                  isDark: isDark,
+                  textColor: textColor,
+                  secondary: labelColor,
+                  accent: const Color(0xFFFF9F43),
+                  emoji: '🥗',
+                  kindLabel: 'NUTRITION',
+                  snap: _todayNutritionSnap,
+                  emptyTitle: 'Build meal plan',
+                  emptySubtitle: 'Meals, portions & macros',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PlanScreen(
+                          kind: PlanKind.nutrition,
+                          onPlanChanged: () {
+                            ApiService.instance.getUserEmail().then(
+                              (email) => _fetchTodayPlans(email),
+                            );
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHomePlanCard({
+    required bool isDark,
+    required Color textColor,
+    required Color secondary,
+    required Color accent,
+    required String emoji,
+    required String kindLabel,
+    required TodayPlanSnapshot snap,
+    required String emptyTitle,
+    required String emptySubtitle,
+    required VoidCallback onTap,
+  }) {
+    final hasPlan = snap.hasPlan;
+    final statusLabel = !hasPlan
+        ? 'CREATE'
+        : (snap.isRestDay ? 'REST' : 'TODAY');
+    final statusColor = !hasPlan
+        ? accent
+        : (snap.isRestDay ? const Color(0xFF8F6BFF) : const Color(0xFF2EE5A3));
+
+    return GlassCard(
+      margin: EdgeInsets.zero,
+      padding: EdgeInsets.zero,
+      borderRadius: 20,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 158),
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  accent.withOpacity(isDark ? 0.16 : 0.12),
+                  accent.withOpacity(0.0),
+                ],
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: accent.withOpacity(isDark ? 0.18 : 0.14),
+                        border: Border.all(color: accent.withOpacity(0.28)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: accent.withOpacity(0.2),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: Text(
+                          emoji,
+                          style: const TextStyle(fontSize: 17),
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        color: statusColor.withOpacity(0.14),
+                      ),
+                      child: Text(
+                        statusLabel,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.6,
+                          color: statusColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  kindLabel,
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.7,
+                    color: accent,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  hasPlan ? snap.title : emptyTitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                    height: 1.2,
+                    color: textColor,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  hasPlan ? snap.preview : emptySubtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    height: 1.3,
+                    fontWeight: FontWeight.w500,
+                    color: secondary,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Text(
+                      hasPlan ? 'Open today' : 'Start',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        color: accent,
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    Icon(Icons.arrow_forward_rounded, size: 14, color: accent),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -4299,16 +4555,54 @@ class DashboardScreenState extends State<DashboardScreen>
                       "🍲",
                       "Log Meal",
                       const Color(0xFFFFB03A),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const NutritionLoggingScreen(),
+                          ),
+                        );
+                      },
                     ),
                     _buildQuickAccessItem(
-                      "🩺",
-                      "Doctor",
-                      const Color(0xFFFF65A3),
+                      "🥗",
+                      "Meal Plan",
+                      const Color(0xFFFF9F43),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PlanScreen(
+                              kind: PlanKind.nutrition,
+                              onPlanChanged: () {
+                                ApiService.instance.getUserEmail().then(
+                                  (email) => _fetchTodayPlans(email),
+                                );
+                              },
+                            ),
+                          ),
+                        );
+                      },
                     ),
                     _buildQuickAccessItem(
                       "💪",
-                      "Trainer",
-                      const Color(0xFF2EE5A3),
+                      "Workout",
+                      const Color(0xFF5B8CFF),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PlanScreen(
+                              kind: PlanKind.workout,
+                              onPlanChanged: () {
+                                ApiService.instance.getUserEmail().then(
+                                  (email) => _fetchTodayPlans(email),
+                                );
+                              },
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -4325,11 +4619,25 @@ class DashboardScreenState extends State<DashboardScreen>
                       "🛡️",
                       "SOS",
                       const Color(0xFFFF3B30),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const SosScreen()),
+                        );
+                      },
                     ),
                     _buildQuickAccessItem(
                       "🏆",
                       "Compete",
                       const Color(0xFFFFD60A),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ChallengesScreen(),
+                          ),
+                        );
+                      },
                     ),
                     _buildQuickAccessItem(
                       "✨",
@@ -4346,34 +4654,43 @@ class DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _buildQuickAccessItem(String emoji, String title, Color color) {
+  Widget _buildQuickAccessItem(
+    String emoji,
+    String title,
+    Color color, {
+    VoidCallback? onTap,
+  }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Expanded(
-      child: Column(
-        children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              shape: BoxShape.circle,
-              border: Border.all(color: color.withOpacity(0.2), width: 1.2),
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                shape: BoxShape.circle,
+                border: Border.all(color: color.withOpacity(0.2), width: 1.2),
+              ),
+              child: Center(
+                child: Text(emoji, style: const TextStyle(fontSize: 18)),
+              ),
             ),
-            child: Center(
-              child: Text(emoji, style: const TextStyle(fontSize: 18)),
+            const SizedBox(height: 6),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: isDark ? Colors.white70 : Colors.black87,
+              ),
             ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: isDark ? Colors.white70 : Colors.black87,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -4584,17 +4901,185 @@ class DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  /// Top-of-dashboard priority actions: SOS + Gym Check-in.
+  Widget _buildTopPriorityActions(ThemeData theme, bool isDark) {
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final secondary = isDark ? Colors.white60 : Colors.black54;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildTopActionCard(
+              isDark: isDark,
+              textColor: textColor,
+              secondary: secondary,
+              accent: const Color(0xFFFF3B30),
+              emoji: '🛡️',
+              badge: 'SOS',
+              title: 'Emergency',
+              subtitle: 'Alert contacts',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SosScreen()),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _buildTopActionCard(
+              isDark: isDark,
+              textColor: textColor,
+              secondary: secondary,
+              accent: Colors.indigoAccent,
+              emoji: _gymCheckedIn ? '🏋️‍♂️' : '📍',
+              badge: _gymCheckedIn ? 'GYM ACTIVE' : 'GYM',
+              title: _gymCheckedIn ? (_gymName ?? 'Workout') : 'Gym Check-in',
+              subtitle: _gymCheckedIn
+                  ? _formatDuration(_gymElapsed)
+                  : 'Scan & start',
+              live: _gymCheckedIn,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => GymCheckinScreen(
+                      onStatusChanged: () {
+                        _loadGymState();
+                        _fetchActiveChallenges();
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopActionCard({
+    required bool isDark,
+    required Color textColor,
+    required Color secondary,
+    required Color accent,
+    required String emoji,
+    required String badge,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+    bool live = false,
+  }) {
+    return GlassCard(
+      margin: EdgeInsets.zero,
+      padding: EdgeInsets.zero,
+      borderRadius: 18,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: accent.withOpacity(isDark ? 0.16 : 0.12),
+                    border: Border.all(color: accent.withOpacity(0.28)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: accent.withOpacity(isDark ? 0.22 : 0.14),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: Text(emoji, style: const TextStyle(fontSize: 18)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              badge,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.6,
+                                color: accent,
+                              ),
+                            ),
+                          ),
+                          if (live) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: const BoxDecoration(
+                                color: Colors.redAccent,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                          color: textColor,
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: secondary,
+                          fontFamily: live ? 'monospace' : null,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: secondary.withOpacity(0.7),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildActiveChallengesRow(ThemeData theme, bool isDark) {
     final textColor = isDark ? Colors.white : Colors.black87;
-
-    // Determine if gym check-in card should be shown
-    bool showGymCheckinCard = false;
-    final hasActiveGymChallenge = _activeChallenges.any(
-      (c) =>
-          c.metricType == 'workouts' ||
-          c.title.toLowerCase().contains('gym') ||
-          c.title.toLowerCase().contains('workout'),
-    );
 
     final isGymCompletedToday = _activeChallenges.any(
       (c) =>
@@ -4604,13 +5089,7 @@ class DashboardScreenState extends State<DashboardScreen>
           c.completedToday,
     );
 
-    if (_gymCheckedIn) {
-      showGymCheckinCard = true;
-    } else if (!isGymCompletedToday && hasActiveGymChallenge) {
-      showGymCheckinCard = true;
-    }
-
-    // Filter other active challenges (if gym check-in & out is done today, don't show gym/workouts challenges in active goals)
+    // Gym check-in is always in the top priority row; only list challenges here.
     final otherChallenges = _activeChallenges.where((c) {
       final isGym =
           c.metricType == 'workouts' ||
@@ -4622,10 +5101,9 @@ class DashboardScreenState extends State<DashboardScreen>
       return true;
     }).toList();
 
-    final totalItems = (showGymCheckinCard ? 1 : 0) + otherChallenges.length;
+    final totalItems = otherChallenges.length;
     final isSingleItem = totalItems == 1;
 
-    // If nothing to show, return shrink
     if (totalItems == 0) {
       return const SizedBox.shrink();
     }
@@ -4640,13 +5118,11 @@ class DashboardScreenState extends State<DashboardScreen>
             child: SizedBox(
               width: double.infinity,
               height: 72,
-              child: showGymCheckinCard
-                  ? _buildGymCheckinDashboardCard(isDark, isSingleItem: true)
-                  : _buildChallengeDashboardCard(
-                      otherChallenges.first,
-                      isDark,
-                      isSingleItem: true,
-                    ),
+              child: _buildChallengeDashboardCard(
+                otherChallenges.first,
+                isDark,
+                isSingleItem: true,
+              ),
             ),
           ),
         ],
@@ -4665,8 +5141,6 @@ class DashboardScreenState extends State<DashboardScreen>
             physics: const BouncingScrollPhysics(),
             padding: const EdgeInsets.symmetric(horizontal: 10),
             children: [
-              if (showGymCheckinCard)
-                _buildGymCheckinDashboardCard(isDark, isSingleItem: false),
               ...otherChallenges.map(
                 (c) => _buildChallengeDashboardCard(
                   c,

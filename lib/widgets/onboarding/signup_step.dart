@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
+import '../app_brand_logo.dart';
 import '../glass_card.dart';
 import 'fade_slide_transition.dart';
 
@@ -59,10 +60,15 @@ class _SignupStepState extends State<SignupStep> {
   }
 
   bool get _hasMinLength => widget.passwordController.text.length >= 8;
-  bool get _hasUppercase => widget.passwordController.text.contains(RegExp(r'[A-Z]'));
-  bool get _hasLowercase => widget.passwordController.text.contains(RegExp(r'[a-z]'));
-  bool get _hasNumber => widget.passwordController.text.contains(RegExp(r'[0-9]'));
-  bool get _hasSpecialChar => widget.passwordController.text.contains(RegExp(r'[!@#\$%^&*(),.?":{}|<>]'));
+  bool get _hasUppercase =>
+      widget.passwordController.text.contains(RegExp(r'[A-Z]'));
+  bool get _hasLowercase =>
+      widget.passwordController.text.contains(RegExp(r'[a-z]'));
+  bool get _hasNumber =>
+      widget.passwordController.text.contains(RegExp(r'[0-9]'));
+  bool get _hasSpecialChar => widget.passwordController.text.contains(
+    RegExp(r'[!@#\$%^&*(),.?":{}|<>]'),
+  );
 
   int get _strengthScore {
     int score = 0;
@@ -92,40 +98,18 @@ class _SignupStepState extends State<SignupStep> {
                 delay: Duration.zero,
                 child: Column(
                   children: [
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.blueAccent.withOpacity(
-                              isDark ? 0.1 : 0.2,
-                            ),
-                            blurRadius: 16,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
+                    // Wide white wordmark on dark plate (transparent-safe)
+                    const AppBrandLogo(
+                      height: 92,
+                      maxWidth: 320,
+                      borderRadius: 20,
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
                       ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: Image.asset(
-                          'assets/app_logo.png',
-                          fit: BoxFit.cover,
-                        ),
-                      ),
+                      elevated: true,
                     ),
                     const SizedBox(height: 16),
-                    Text(
-                      "arcahre wellness",
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w900,
-                        color: isDark ? Colors.white : const Color(0xFF0F52BA),
-                        letterSpacing: -1.0,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
                     Text(
                       "Welcome Back",
                       style: TextStyle(
@@ -142,26 +126,18 @@ class _SignupStepState extends State<SignupStep> {
             ] else ...[
               FadeSlideTransition(
                 delay: Duration.zero,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                child: Column(
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Image.asset(
-                        'assets/app_logo.png',
-                        width: 38,
-                        height: 38,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
+                    const AppBrandLogo.compact(),
+                    const SizedBox(height: 10),
                     Text(
-                      "arcahre wellness",
+                      "Create your account",
                       style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w900,
-                        color: isDark ? Colors.white : const Color(0xFF0F52BA),
-                        letterSpacing: -0.8,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: isDark
+                            ? Colors.grey[300]
+                            : const Color(0xFF556677),
                       ),
                     ),
                   ],
@@ -280,7 +256,8 @@ class _SignupStepState extends State<SignupStep> {
                             "PASSWORD",
                             trailing: _isLogin
                                 ? GestureDetector(
-                                    onTap: () => _showForgotPasswordDialog(context),
+                                    onTap: () =>
+                                        _showForgotPasswordDialog(context),
                                     child: const Text(
                                       "Forgot Password?",
                                       style: TextStyle(
@@ -327,22 +304,24 @@ class _SignupStepState extends State<SignupStep> {
                                     : null;
                               }
                               if (v == null || v.isEmpty) {
-                                    return "Please enter a password";
+                                return "Please enter a password";
                               }
                               if (v.length < 8) {
-                                    return "Password must be at least 8 characters";
+                                return "Password must be at least 8 characters";
                               }
                               if (!v.contains(RegExp(r'[A-Z]'))) {
-                                    return "Must contain at least one uppercase letter";
+                                return "Must contain at least one uppercase letter";
                               }
                               if (!v.contains(RegExp(r'[a-z]'))) {
-                                    return "Must contain at least one lowercase letter";
+                                return "Must contain at least one lowercase letter";
                               }
                               if (!v.contains(RegExp(r'[0-9]'))) {
-                                    return "Must contain at least one number";
+                                return "Must contain at least one number";
                               }
-                              if (!v.contains(RegExp(r'[!@#\$%^&*(),.?":{}|<>]'))) {
-                                    return "Must contain at least one special character";
+                              if (!v.contains(
+                                RegExp(r'[!@#\$%^&*(),.?":{}|<>]'),
+                              )) {
+                                return "Must contain at least one special character";
                               }
                               return null;
                             },
@@ -659,7 +638,7 @@ class _SignupStepState extends State<SignupStep> {
                       Text(
                         _isLogin
                             ? "SECURE, HIPAA COMPLIANT PORTAL"
-                            : "2026 arcahre wellness. Secure HIPAA compliant registration.",
+                            : "2026 Medifit Wellness. Secure HIPAA compliant registration.",
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
@@ -700,11 +679,13 @@ class _SignupStepState extends State<SignupStep> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final TextEditingController recoveryEmailController = TextEditingController(text: widget.emailController.text);
+    final TextEditingController recoveryEmailController = TextEditingController(
+      text: widget.emailController.text,
+    );
     final TextEditingController otpController = TextEditingController();
     final TextEditingController newPasswordController = TextEditingController();
 
-    int currentStep = 0; 
+    int currentStep = 0;
     bool isDialogLoading = false;
     String errorMessage = '';
     String resetToken = '';
@@ -733,10 +714,10 @@ class _SignupStepState extends State<SignupStep> {
                             currentStep == 0
                                 ? "Reset Password"
                                 : currentStep == 1
-                                    ? "Verify OTP"
-                                    : currentStep == 2
-                                        ? "New Password"
-                                        : "Success!",
+                                ? "Verify OTP"
+                                : currentStep == 2
+                                ? "New Password"
+                                : "Success!",
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
@@ -764,11 +745,16 @@ class _SignupStepState extends State<SignupStep> {
                           decoration: BoxDecoration(
                             color: Colors.redAccent.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+                            border: Border.all(
+                              color: Colors.redAccent.withOpacity(0.3),
+                            ),
                           ),
                           child: Text(
                             errorMessage,
-                            style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                            style: const TextStyle(
+                              color: Colors.redAccent,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -786,8 +772,13 @@ class _SignupStepState extends State<SignupStep> {
                         TextFormField(
                           controller: recoveryEmailController,
                           keyboardType: TextInputType.emailAddress,
-                          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                          decoration: _mockupInputDecoration("alex@vitality.pro", isDark),
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                          decoration: _mockupInputDecoration(
+                            "alex@vitality.pro",
+                            isDark,
+                          ),
                         ),
                         const SizedBox(height: 24),
                         ElevatedButton(
@@ -795,15 +786,19 @@ class _SignupStepState extends State<SignupStep> {
                             backgroundColor: const Color(0xFF0F52BA),
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
                           ),
                           onPressed: isDialogLoading
                               ? null
                               : () async {
-                                  final email = recoveryEmailController.text.trim();
+                                  final email = recoveryEmailController.text
+                                      .trim();
                                   if (email.isEmpty || !email.contains('@')) {
                                     setDialogState(() {
-                                      errorMessage = 'Please enter a valid email address.';
+                                      errorMessage =
+                                          'Please enter a valid email address.';
                                     });
                                     return;
                                   }
@@ -812,13 +807,18 @@ class _SignupStepState extends State<SignupStep> {
                                     errorMessage = '';
                                   });
                                   try {
-                                    await AuthService.instance.forgotPassword(email);
+                                    await AuthService.instance.forgotPassword(
+                                      email,
+                                    );
                                     setDialogState(() {
                                       currentStep = 1;
                                     });
                                   } catch (e) {
                                     setDialogState(() {
-                                      errorMessage = e.toString().replaceAll('Exception: ', '');
+                                      errorMessage = e.toString().replaceAll(
+                                        'Exception: ',
+                                        '',
+                                      );
                                     });
                                   } finally {
                                     setDialogState(() {
@@ -830,9 +830,15 @@ class _SignupStepState extends State<SignupStep> {
                               ? const SizedBox(
                                   width: 20,
                                   height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
                                 )
-                              : const Text("Send OTP", style: TextStyle(fontWeight: FontWeight.bold)),
+                              : const Text(
+                                  "Send OTP",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
                         ),
                       ] else if (currentStep == 1) ...[
                         Text(
@@ -861,9 +867,17 @@ class _SignupStepState extends State<SignupStep> {
                             Expanded(
                               child: OutlinedButton(
                                 style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                  side: BorderSide(color: isDark ? Colors.white24 : Colors.grey[300]!),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  side: BorderSide(
+                                    color: isDark
+                                        ? Colors.white24
+                                        : Colors.grey[300]!,
+                                  ),
                                 ),
                                 onPressed: isDialogLoading
                                     ? null
@@ -873,7 +887,14 @@ class _SignupStepState extends State<SignupStep> {
                                           errorMessage = '';
                                         });
                                       },
-                                child: Text("Back", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                                child: Text(
+                                  "Back",
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
+                                  ),
+                                ),
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -882,8 +903,12 @@ class _SignupStepState extends State<SignupStep> {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFF0F52BA),
                                   foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
                                 ),
                                 onPressed: isDialogLoading
                                     ? null
@@ -891,7 +916,8 @@ class _SignupStepState extends State<SignupStep> {
                                         final otp = otpController.text.trim();
                                         if (otp.length != 6) {
                                           setDialogState(() {
-                                            errorMessage = 'Please enter the 6-digit OTP code.';
+                                            errorMessage =
+                                                'Please enter the 6-digit OTP code.';
                                           });
                                           return;
                                         }
@@ -900,17 +926,22 @@ class _SignupStepState extends State<SignupStep> {
                                           errorMessage = '';
                                         });
                                         try {
-                                          final token = await AuthService.instance.verifyOtp(
-                                            recoveryEmailController.text.trim(),
-                                            otp,
-                                          );
+                                          final token = await AuthService
+                                              .instance
+                                              .verifyOtp(
+                                                recoveryEmailController.text
+                                                    .trim(),
+                                                otp,
+                                              );
                                           setDialogState(() {
                                             resetToken = token;
                                             currentStep = 2;
                                           });
                                         } catch (e) {
                                           setDialogState(() {
-                                            errorMessage = e.toString().replaceAll('Exception: ', '');
+                                            errorMessage = e
+                                                .toString()
+                                                .replaceAll('Exception: ', '');
                                           });
                                         } finally {
                                           setDialogState(() {
@@ -922,9 +953,17 @@ class _SignupStepState extends State<SignupStep> {
                                     ? const SizedBox(
                                         width: 20,
                                         height: 20,
-                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
                                       )
-                                    : const Text("Verify OTP", style: TextStyle(fontWeight: FontWeight.bold)),
+                                    : const Text(
+                                        "Verify OTP",
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
                               ),
                             ),
                           ],
@@ -941,8 +980,13 @@ class _SignupStepState extends State<SignupStep> {
                         TextFormField(
                           controller: newPasswordController,
                           obscureText: true,
-                          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                          decoration: _mockupInputDecoration("New password", isDark),
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                          decoration: _mockupInputDecoration(
+                            "New password",
+                            isDark,
+                          ),
                         ),
                         const SizedBox(height: 24),
                         ElevatedButton(
@@ -950,15 +994,19 @@ class _SignupStepState extends State<SignupStep> {
                             backgroundColor: const Color(0xFF0F52BA),
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
                           ),
                           onPressed: isDialogLoading
                               ? null
                               : () async {
-                                  final newPass = newPasswordController.text.trim();
+                                  final newPass = newPasswordController.text
+                                      .trim();
                                   if (newPass.length < 6) {
                                     setDialogState(() {
-                                      errorMessage = 'Password must be at least 6 characters.';
+                                      errorMessage =
+                                          'Password must be at least 6 characters.';
                                     });
                                     return;
                                   }
@@ -967,13 +1015,19 @@ class _SignupStepState extends State<SignupStep> {
                                     errorMessage = '';
                                   });
                                   try {
-                                    await AuthService.instance.resetPassword(resetToken, newPass);
+                                    await AuthService.instance.resetPassword(
+                                      resetToken,
+                                      newPass,
+                                    );
                                     setDialogState(() {
                                       currentStep = 3;
                                     });
                                   } catch (e) {
                                     setDialogState(() {
-                                      errorMessage = e.toString().replaceAll('Exception: ', '');
+                                      errorMessage = e.toString().replaceAll(
+                                        'Exception: ',
+                                        '',
+                                      );
                                     });
                                   } finally {
                                     setDialogState(() {
@@ -985,9 +1039,15 @@ class _SignupStepState extends State<SignupStep> {
                               ? const SizedBox(
                                   width: 20,
                                   height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
                                 )
-                              : const Text("Reset Password", style: TextStyle(fontWeight: FontWeight.bold)),
+                              : const Text(
+                                  "Reset Password",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
                         ),
                       ] else if (currentStep == 3) ...[
                         const Icon(
@@ -1010,7 +1070,9 @@ class _SignupStepState extends State<SignupStep> {
                             backgroundColor: Colors.green,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
                           ),
                           onPressed: () {
                             recoveryEmailController.dispose();
@@ -1018,7 +1080,10 @@ class _SignupStepState extends State<SignupStep> {
                             newPasswordController.dispose();
                             Navigator.of(context).pop();
                           },
-                          child: const Text("Done", style: TextStyle(fontWeight: FontWeight.bold)),
+                          child: const Text(
+                            "Done",
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
                         ),
                       ],
                     ],
@@ -1080,7 +1145,7 @@ class _SignupStepState extends State<SignupStep> {
 
   Widget _buildPasswordIndicator(bool isDark) {
     final isFocused = _passwordFocusNode.hasFocus;
-    
+
     if (widget.passwordController.text.isEmpty && !isFocused) {
       return const SizedBox.shrink();
     }
@@ -1107,12 +1172,14 @@ class _SignupStepState extends State<SignupStep> {
         margin: const EdgeInsets.only(top: 14),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isDark 
-              ? Colors.white.withOpacity(0.02) 
+          color: isDark
+              ? Colors.white.withOpacity(0.02)
               : Colors.black.withOpacity(0.015),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06),
+            color: isDark
+                ? Colors.white.withOpacity(0.08)
+                : Colors.black.withOpacity(0.06),
             width: 1.0,
           ),
         ),
@@ -1126,7 +1193,9 @@ class _SignupStepState extends State<SignupStep> {
                 Row(
                   children: [
                     Icon(
-                      score == 5 ? Icons.verified_user : Icons.gpp_maybe_outlined,
+                      score == 5
+                          ? Icons.verified_user
+                          : Icons.gpp_maybe_outlined,
                       size: 15,
                       color: strengthColor,
                     ),
@@ -1192,10 +1261,20 @@ class _SignupStepState extends State<SignupStep> {
                 Row(
                   children: [
                     Expanded(
-                      child: _buildRequirementRow("8+ Characters", _hasMinLength, Icons.straighten, isDark),
+                      child: _buildRequirementRow(
+                        "8+ Characters",
+                        _hasMinLength,
+                        Icons.straighten,
+                        isDark,
+                      ),
                     ),
                     Expanded(
-                      child: _buildRequirementRow("Uppercase Letter", _hasUppercase, Icons.title, isDark),
+                      child: _buildRequirementRow(
+                        "Uppercase Letter",
+                        _hasUppercase,
+                        Icons.title,
+                        isDark,
+                      ),
                     ),
                   ],
                 ),
@@ -1203,10 +1282,20 @@ class _SignupStepState extends State<SignupStep> {
                 Row(
                   children: [
                     Expanded(
-                      child: _buildRequirementRow("Lowercase Letter", _hasLowercase, Icons.text_fields, isDark),
+                      child: _buildRequirementRow(
+                        "Lowercase Letter",
+                        _hasLowercase,
+                        Icons.text_fields,
+                        isDark,
+                      ),
                     ),
                     Expanded(
-                      child: _buildRequirementRow("Numeric Digit", _hasNumber, Icons.numbers, isDark),
+                      child: _buildRequirementRow(
+                        "Numeric Digit",
+                        _hasNumber,
+                        Icons.numbers,
+                        isDark,
+                      ),
                     ),
                   ],
                 ),
@@ -1214,7 +1303,12 @@ class _SignupStepState extends State<SignupStep> {
                 Row(
                   children: [
                     Expanded(
-                      child: _buildRequirementRow("Special Symbol", _hasSpecialChar, Icons.alternate_email, isDark),
+                      child: _buildRequirementRow(
+                        "Special Symbol",
+                        _hasSpecialChar,
+                        Icons.alternate_email,
+                        isDark,
+                      ),
                     ),
                     const Expanded(child: SizedBox.shrink()),
                   ],
@@ -1227,15 +1321,20 @@ class _SignupStepState extends State<SignupStep> {
     );
   }
 
-  Widget _buildRequirementRow(String label, bool isMet, IconData icon, bool isDark) {
-    final activeColor = isMet 
-        ? Colors.greenAccent 
+  Widget _buildRequirementRow(
+    String label,
+    bool isMet,
+    IconData icon,
+    bool isDark,
+  ) {
+    final activeColor = isMet
+        ? Colors.greenAccent
         : (isDark ? Colors.white30 : Colors.black38);
     final textStyle = TextStyle(
       fontSize: 11,
       fontWeight: isMet ? FontWeight.bold : FontWeight.w500,
-      color: isMet 
-          ? (isDark ? Colors.white : Colors.black87) 
+      color: isMet
+          ? (isDark ? Colors.white : Colors.black87)
           : (isDark ? Colors.white30 : Colors.black38),
     );
 
@@ -1247,21 +1346,17 @@ class _SignupStepState extends State<SignupStep> {
           padding: const EdgeInsets.all(5),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: isMet 
-                ? Colors.greenAccent.withOpacity(isDark ? 0.15 : 0.2) 
+            color: isMet
+                ? Colors.greenAccent.withOpacity(isDark ? 0.15 : 0.2)
                 : Colors.transparent,
             border: Border.all(
-              color: isMet 
-                  ? Colors.greenAccent.withOpacity(0.5) 
+              color: isMet
+                  ? Colors.greenAccent.withOpacity(0.5)
                   : (isDark ? Colors.white10 : Colors.black12),
               width: 1.0,
             ),
           ),
-          child: Icon(
-            icon,
-            size: 13,
-            color: activeColor,
-          ),
+          child: Icon(icon, size: 13, color: activeColor),
         ),
         const SizedBox(width: 8),
         Expanded(

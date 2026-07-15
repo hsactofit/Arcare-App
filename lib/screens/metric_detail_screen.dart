@@ -38,6 +38,20 @@ class _MetricDetailScreenState extends State<MetricDetailScreen>
   late AnimationController _chartAnimController;
   late AnimationController _bgAnimController;
 
+  Widget _buildHeaderIcon(String icon) {
+    if (icon.startsWith('assets/')) {
+      return Image.asset(
+        icon,
+        width: 30,
+        height: 30,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) =>
+            Text(icon, style: const TextStyle(fontSize: 28)),
+      );
+    }
+    return Text(icon, style: const TextStyle(fontSize: 28));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -235,7 +249,7 @@ class _MetricDetailScreenState extends State<MetricDetailScreen>
                           onPressed: () => Navigator.pop(context),
                         ),
                         const SizedBox(width: 8),
-                        Text(widget.icon, style: const TextStyle(fontSize: 28)),
+                        _buildHeaderIcon(widget.icon),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(

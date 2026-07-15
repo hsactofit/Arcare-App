@@ -63,6 +63,8 @@ class _NutritionLoggingScreenState extends State<NutritionLoggingScreen>
   String _selectedGraphPeriod = "week";
   List<Map<String, dynamic>> _graphData = [];
   bool _isLoadingGraph = false;
+  String? _graphError;
+  String _graphMetric = "calories"; // calories | protein | fat | carbs
 
   // Form controllers
   final TextEditingController _foodNameCtrl = TextEditingController();
@@ -127,21 +129,58 @@ class _NutritionLoggingScreenState extends State<NutritionLoggingScreen>
   }
 
   Future<void> _fetchGraphData() async {
-    setState(() => _isLoadingGraph = true);
+    if (!mounted) return;
+    setState(() {
+      _isLoadingGraph = true;
+      _graphError = null;
+    });
     try {
       final email = await ApiService.instance.getUserEmail();
       final result = await ApiService.instance
           .fetchNutritionGraph(email, _selectedGraphPeriod);
-      final data = result['data'] as List<dynamic>? ?? [];
+
+      // Support both { data: [...] } and nested / alternate shapes
+      dynamic raw = result['data'];
+      if (raw is Map) {
+        raw = raw['data'] ?? raw['points'] ?? raw['items'];
+      }
+      raw ??= result['points'] ?? result['items'] ?? result['graph'];
+
+      final List<Map<String, dynamic>> parsed = [];
+      if (raw is List) {
+        for (final item in raw) {
+          if (item is Map) {
+            final m = Map<String, dynamic>.from(item);
+            // Normalize numeric fields that may arrive as strings
+            for (final key in ['calories', 'protein', 'fat', 'carbs']) {
+              final v = m[key] ?? m['${key}_g'] ?? m[key.toUpperCase()];
+              if (v != null) {
+                m[key] = (v is num) ? v.toDouble() : double.tryParse('$v') ?? 0.0;
+              } else {
+                m[key] = 0.0;
+              }
+            }
+            m['label'] = (m['label'] ?? m['date'] ?? m['day'] ?? '').toString();
+            parsed.add(m);
+          }
+        }
+      }
+
+      if (!mounted) return;
       setState(() {
-        _graphData =
-            data.map((e) => Map<String, dynamic>.from(e)).toList();
+        _graphData = parsed;
         _isLoadingGraph = false;
+        _graphError = null;
       });
       _graphAnimController.forward(from: 0.0);
     } catch (e) {
       debugPrint("Error fetching nutrition graph: $e");
-      setState(() => _isLoadingGraph = false);
+      if (!mounted) return;
+      setState(() {
+        _isLoadingGraph = false;
+        _graphData = [];
+        _graphError = e.toString().replaceFirst('Exception: ', '');
+      });
     }
   }
 
@@ -742,83 +781,325 @@ class _NutritionLoggingScreenState extends State<NutritionLoggingScreen>
   //  Graph Section
   // ──────────────────────────────────────────────────
   Widget _buildGraphSection(bool isDark, Color textColor) {
+    final subtext = isDark ? Colors.white54 : Colors.black45;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text("Nutrition Trends",
-            style: TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w900, color: textColor)),
-        const SizedBox(height: 12),
-        // Period tabs
         Row(
-          children: ["day", "week", "month"].map((p) {
-            final isSelected = _selectedGraphPeriod == p;
-            final label =
-                p == "day" ? "Day" : p == "week" ? "Week" : "Month";
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                selected: isSelected,
-                selectedColor: Colors.orangeAccent,
-                backgroundColor: isDark
-                    ? Colors.white.withOpacity(0.04)
-                    : Colors.black.withOpacity(0.03),
-                side: BorderSide(
-                  color: isSelected
-                      ? Colors.orangeAccent
-                      : (isDark ? Colors.white10 : Colors.black12),
-                ),
-                label: Text(label,
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: isSelected
-                            ? Colors.white
-                            : (isDark
-                                ? Colors.white70
-                                : Colors.black87))),
-                onSelected: (selected) {
-                  if (selected) {
-                    setState(() => _selectedGraphPeriod = p);
-                    _fetchGraphData();
-                  }
-                },
+          children: [
+            Text(
+              "Nutrition Trends",
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                color: textColor,
               ),
-            );
-          }).toList(),
+            ),
+            const Spacer(),
+            if (!_isLoadingGraph)
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Refresh graph',
+                icon: Icon(Icons.refresh_rounded, size: 20, color: subtext),
+                onPressed: _fetchGraphData,
+              ),
+          ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
+        // Period tabs
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: ["day", "week", "month"].map((p) {
+              final isSelected = _selectedGraphPeriod == p;
+              final label =
+                  p == "day" ? "Day" : p == "week" ? "Week" : "Month";
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  selected: isSelected,
+                  selectedColor: Colors.orangeAccent,
+                  backgroundColor: isDark
+                      ? Colors.white.withOpacity(0.04)
+                      : Colors.black.withOpacity(0.03),
+                  side: BorderSide(
+                    color: isSelected
+                        ? Colors.orangeAccent
+                        : (isDark ? Colors.white10 : Colors.black12),
+                  ),
+                  label: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: isSelected
+                          ? Colors.white
+                          : (isDark ? Colors.white70 : Colors.black87),
+                    ),
+                  ),
+                  onSelected: (selected) {
+                    if (selected && _selectedGraphPeriod != p) {
+                      setState(() => _selectedGraphPeriod = p);
+                      _fetchGraphData();
+                    }
+                  },
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 10),
+        // Metric tabs
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: const [
+              ('calories', 'Calories', Color(0xFFFFA726)),
+              ('protein', 'Protein', Color(0xFF42A5F5)),
+              ('carbs', 'Carbs', Color(0xFF66BB6A)),
+              ('fat', 'Fat', Color(0xFFEF5350)),
+            ].map((m) {
+              final key = m.$1;
+              final label = m.$2;
+              final color = m.$3;
+              final selected = _graphMetric == key;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: FilterChip(
+                  selected: selected,
+                  showCheckmark: false,
+                  selectedColor: color.withOpacity(0.22),
+                  backgroundColor: isDark
+                      ? Colors.white.withOpacity(0.04)
+                      : Colors.black.withOpacity(0.03),
+                  side: BorderSide(
+                    color: selected
+                        ? color
+                        : (isDark ? Colors.white10 : Colors.black12),
+                  ),
+                  label: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: selected
+                          ? color
+                          : (isDark ? Colors.white70 : Colors.black87),
+                    ),
+                  ),
+                  onSelected: (_) {
+                    if (_graphMetric == key) return;
+                    setState(() => _graphMetric = key);
+                    _graphAnimController.forward(from: 0.0);
+                  },
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 14),
         GlassCard(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
           child: SizedBox(
-            height: 200,
+            height: 220,
+            width: double.infinity,
             child: _isLoadingGraph
                 ? const Center(
                     child: CircularProgressIndicator(
-                        color: Colors.orangeAccent, strokeWidth: 2))
-                : _graphData.isEmpty
-                    ? Center(
-                        child: Text("No data for this period",
-                            style: TextStyle(
-                                color: isDark
-                                    ? Colors.white38
-                                    : Colors.black38)))
-                    : AnimatedBuilder(
-                        animation: _graphAnimController,
-                        builder: (context, _) {
-                          return CustomPaint(
-                            size: Size.infinite,
-                            painter: _NutritionBarChartPainter(
-                              data: _graphData,
-                              isDark: isDark,
-                              animProgress: _graphAnimController.value,
-                            ),
-                          );
-                        },
-                      ),
+                      color: Colors.orangeAccent,
+                      strokeWidth: 2,
+                    ),
+                  )
+                : _graphError != null
+                    ? _buildGraphMessage(
+                        isDark: isDark,
+                        icon: Icons.wifi_off_rounded,
+                        title: 'Could not load graph',
+                        message: _graphError!,
+                        actionLabel: 'Retry',
+                        onAction: _fetchGraphData,
+                      )
+                    : _graphData.isEmpty
+                        ? _buildGraphMessage(
+                            isDark: isDark,
+                            icon: Icons.bar_chart_rounded,
+                            title: 'No trend data yet',
+                            message:
+                                'Log some meals and your $_selectedGraphPeriod trend will appear here.',
+                            actionLabel: 'Refresh',
+                            onAction: _fetchGraphData,
+                          )
+                        : Column(
+                            children: [
+                              Expanded(
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    // Give each bar enough room; scroll when dense.
+                                    const minSlot = 36.0;
+                                    final pointCount = _graphData.length;
+                                    final neededWidth =
+                                        pointCount * minSlot + 12;
+                                    final chartWidth = max(
+                                      constraints.maxWidth,
+                                      neededWidth,
+                                    );
+                                    final dense = pointCount > 8;
+
+                                    return AnimatedBuilder(
+                                      animation: _graphAnimController,
+                                      builder: (context, _) {
+                                        final chart = SizedBox(
+                                          width: chartWidth,
+                                          height: constraints.maxHeight,
+                                          child: CustomPaint(
+                                            painter: _NutritionBarChartPainter(
+                                              data: _graphData,
+                                              metricKey: _graphMetric,
+                                              isDark: isDark,
+                                              animProgress:
+                                                  _graphAnimController.value,
+                                            ),
+                                            child: const SizedBox.expand(),
+                                          ),
+                                        );
+
+                                        if (chartWidth <=
+                                            constraints.maxWidth + 0.5) {
+                                          return chart;
+                                        }
+
+                                        return Stack(
+                                          children: [
+                                            SingleChildScrollView(
+                                              scrollDirection: Axis.horizontal,
+                                              physics:
+                                                  const BouncingScrollPhysics(),
+                                              child: chart,
+                                            ),
+                                            if (dense)
+                                              Positioned(
+                                                right: 0,
+                                                top: 0,
+                                                bottom: 28,
+                                                child: IgnorePointer(
+                                                  child: Container(
+                                                    width: 28,
+                                                    decoration: BoxDecoration(
+                                                      gradient: LinearGradient(
+                                                        begin: Alignment
+                                                            .centerLeft,
+                                                        end: Alignment
+                                                            .centerRight,
+                                                        colors: [
+                                                          (isDark
+                                                                  ? const Color(
+                                                                      0xFF16161C)
+                                                                  : Colors
+                                                                      .white)
+                                                              .withOpacity(0),
+                                                          (isDark
+                                                                  ? const Color(
+                                                                      0xFF16161C)
+                                                                  : Colors
+                                                                      .white)
+                                                              .withOpacity(
+                                                                  0.85),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                _graphSummaryLine(),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: subtext,
+                                ),
+                              ),
+                              if (_graphData.length > 8)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    'Swipe chart to see all ${_graphData.length} points',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: subtext,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
           ),
         ),
       ],
+    );
+  }
+
+  String _graphSummaryLine() {
+    if (_graphData.isEmpty) return '';
+    final values = _graphData
+        .map((d) => (d[_graphMetric] as num?)?.toDouble() ?? 0.0)
+        .toList();
+    final total = values.fold<double>(0, (a, b) => a + b);
+    final avg = total / values.length;
+    final unit = _graphMetric == 'calories' ? 'kcal' : 'g';
+    final label = _graphMetric[0].toUpperCase() + _graphMetric.substring(1);
+    return '$label · avg ${avg.toStringAsFixed(0)} $unit · total ${total.toStringAsFixed(0)} $unit';
+  }
+
+  Widget _buildGraphMessage({
+    required bool isDark,
+    required IconData icon,
+    required String title,
+    required String message,
+    required String actionLabel,
+    required VoidCallback onAction,
+  }) {
+    final muted = isDark ? Colors.white54 : Colors.black45;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 32, color: muted),
+            const SizedBox(height: 10),
+            Text(
+              title,
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 14,
+                color: isDark ? Colors.white70 : Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, height: 1.35, color: muted),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: onAction,
+              child: Text(actionLabel),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -879,99 +1160,218 @@ class _CalorieRingPainter extends CustomPainter {
 // ──────────────────────────────────────────────────────────────
 class _NutritionBarChartPainter extends CustomPainter {
   final List<Map<String, dynamic>> data;
+  final String metricKey;
   final bool isDark;
   final double animProgress;
 
   _NutritionBarChartPainter({
     required this.data,
+    required this.metricKey,
     required this.isDark,
     required this.animProgress,
   });
 
+  Color get _barColor {
+    switch (metricKey) {
+      case 'protein':
+        return const Color(0xFF42A5F5);
+      case 'carbs':
+        return const Color(0xFF66BB6A);
+      case 'fat':
+        return const Color(0xFFEF5350);
+      default:
+        return const Color(0xFFFFA726);
+    }
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     if (data.isEmpty) return;
-
-    // Extract calorie values
-    final values =
-        data.map((d) => (d['calories'] as num?)?.toDouble() ?? 0.0).toList();
-    final labels =
-        data.map((d) => (d['label'] as String?) ?? '').toList();
-
-    final maxVal = values.reduce(max);
-    if (maxVal == 0) return;
-
-    final int count = values.length;
-    const double bottomPadding = 28;
-    const double topPadding = 12;
-    final double chartHeight = size.height - bottomPadding - topPadding;
-    final double barWidth = (size.width / count) * 0.55;
-    final double spacing = size.width / count;
-
-    // Grid lines
-    final gridPaint = Paint()
-      ..color = (isDark ? Colors.white : Colors.black).withOpacity(0.06)
-      ..strokeWidth = 1;
-    for (int i = 0; i <= 4; i++) {
-      final y = topPadding + chartHeight * (1 - i / 4);
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    // Guard against invalid layout sizes
+    if (!size.width.isFinite ||
+        !size.height.isFinite ||
+        size.width <= 0 ||
+        size.height <= 0) {
+      return;
     }
 
-    // Bars
+    final values = data
+        .map((d) => (d[metricKey] as num?)?.toDouble() ?? 0.0)
+        .toList();
+    final labels = data.map((d) => (d['label'] as String?) ?? '').toList();
+
+    double maxVal = values.fold<double>(0, max);
+    // Avoid divide-by-zero; still draw baseline labels
+    if (maxVal <= 0) maxVal = 1;
+
+    final int count = values.length;
+    if (count == 0) return;
+
+    // Dense charts: leave room for Y labels, fewer X labels, no bar values
+    final bool dense = count > 8;
+    final bool veryDense = count > 16;
+
+    const double leftPadding = 28;
+    const double rightPadding = 8;
+    const double bottomPadding = 34;
+    const double topPadding = 18;
+    final double chartWidth =
+        (size.width - leftPadding - rightPadding).clamp(1.0, size.width);
+    final double chartHeight =
+        (size.height - bottomPadding - topPadding).clamp(1.0, size.height);
+
+    final double spacing = chartWidth / count;
+    // Keep bars readable; wider scroll area is preferred over crammed bars
+    final double barWidth = (spacing * (dense ? 0.52 : 0.58))
+        .clamp(veryDense ? 6.0 : 10.0, dense ? 28.0 : 42.0);
+
+    // Which X labels to show (avoid overlap)
+    final labelIndexes = _labelIndexes(count, dense: dense, veryDense: veryDense);
+
+    // Grid lines + Y labels
+    final gridPaint = Paint()
+      ..color = (isDark ? Colors.white : Colors.black).withOpacity(0.07)
+      ..strokeWidth = 1;
+
+    for (int i = 0; i <= 4; i++) {
+      final t = i / 4;
+      final y = topPadding + chartHeight * (1 - t);
+      canvas.drawLine(
+        Offset(leftPadding, y),
+        Offset(size.width - rightPadding, y),
+        gridPaint,
+      );
+      if (i == 0 || i == 2 || i == 4) {
+        final tp = TextPainter(
+          text: TextSpan(
+            text: _formatValue(maxVal * t),
+            style: TextStyle(
+              fontSize: 9,
+              color: isDark ? Colors.white38 : Colors.black38,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(
+          canvas,
+          Offset(
+            (leftPadding - tp.width - 4).clamp(0.0, leftPadding),
+            y - tp.height / 2,
+          ),
+        );
+      }
+    }
+
+    final baseColor = _barColor;
+
     for (int i = 0; i < count; i++) {
-      final normalised = values[i] / maxVal;
-      final barHeight = chartHeight * normalised * animProgress;
-      final x = spacing * i + (spacing - barWidth) / 2;
+      final normalised = (values[i] / maxVal).clamp(0.0, 1.0);
+      final barHeight =
+          (chartHeight * normalised * animProgress.clamp(0.0, 1.0))
+              .clamp(0.0, chartHeight);
+      final x = leftPadding + spacing * i + (spacing - barWidth) / 2;
       final y = topPadding + chartHeight - barHeight;
 
-      final barRect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(x, y, barWidth, barHeight),
-        const Radius.circular(6),
-      );
+      // Soft track only when not too dense
+      if (!veryDense) {
+        final trackRect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, topPadding, barWidth, chartHeight),
+          Radius.circular(dense ? 5 : 8),
+        );
+        canvas.drawRRect(
+          trackRect,
+          Paint()
+            ..color = (isDark ? Colors.white : Colors.black).withOpacity(0.04),
+        );
+      }
 
-      final paint = Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            const Color(0xFFFFA726),
-            const Color(0xFFFF7043).withOpacity(0.6),
-          ],
-        ).createShader(Rect.fromLTWH(x, y, barWidth, barHeight));
-      canvas.drawRRect(barRect, paint);
+      if (barHeight > 0.5) {
+        final barRect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, y, barWidth, barHeight),
+          Radius.circular(dense ? 5 : 8),
+        );
+        final paint = Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              baseColor,
+              baseColor.withOpacity(0.55),
+            ],
+          ).createShader(Rect.fromLTWH(x, y, barWidth, barHeight));
+        canvas.drawRRect(barRect, paint);
+      }
 
-      // Value label
-      if (animProgress > 0.8) {
+      // Value on top only when sparse enough
+      if (!dense && animProgress > 0.85 && values[i] > 0) {
         final tp = TextPainter(
           text: TextSpan(
             text: _formatValue(values[i]),
             style: TextStyle(
-                fontSize: 9,
-                color: isDark ? Colors.white70 : Colors.black54,
-                fontWeight: FontWeight.bold),
+              fontSize: 9,
+              color: isDark ? Colors.white70 : Colors.black54,
+              fontWeight: FontWeight.bold,
+            ),
           ),
           textDirection: TextDirection.ltr,
-        )..layout();
-        tp.paint(canvas,
-            Offset(x + barWidth / 2 - tp.width / 2, y - tp.height - 4));
+        )..layout(maxWidth: spacing);
+        final labelX = (x + barWidth / 2 - tp.width / 2)
+            .clamp(leftPadding, size.width - tp.width);
+        tp.paint(canvas, Offset(labelX, y - tp.height - 3));
       }
 
-      // Label
-      final labelText = _shortLabel(labels.length > i ? labels[i] : '');
+      // X label — only selected indexes to prevent clutter
+      if (!labelIndexes.contains(i)) continue;
+
+      final labelText = _shortLabel(
+        labels.length > i ? labels[i] : '',
+        dense: dense,
+      );
+      if (labelText.isEmpty) continue;
+
       final labelTp = TextPainter(
         text: TextSpan(
           text: labelText,
           style: TextStyle(
-              fontSize: 9,
-              color: isDark ? Colors.white54 : Colors.black45),
+            fontSize: dense ? 8.5 : 9,
+            color: isDark ? Colors.white54 : Colors.black45,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         textDirection: TextDirection.ltr,
-      )..layout();
+        maxLines: 1,
+        ellipsis: '…',
+      )..layout(maxWidth: max(spacing * (dense ? 1.8 : 1.2), 28));
+
+      final lx = (x + barWidth / 2 - labelTp.width / 2)
+          .clamp(0.0, size.width - labelTp.width);
       labelTp.paint(
-          canvas,
-          Offset(x + barWidth / 2 - labelTp.width / 2,
-              size.height - bottomPadding + 6));
+        canvas,
+        Offset(lx, size.height - bottomPadding + 10),
+      );
     }
+  }
+
+  /// Pick evenly spaced X labels so text never piles up.
+  Set<int> _labelIndexes(
+    int count, {
+    required bool dense,
+    required bool veryDense,
+  }) {
+    if (count <= 1) return {0};
+    if (count <= 6) {
+      return {for (var i = 0; i < count; i++) i};
+    }
+
+    // Target ~5–7 labels for dense day charts
+    final target = veryDense ? 5 : (dense ? 6 : 8);
+    final step = max(1, (count - 1) / (target - 1));
+    final indexes = <int>{0, count - 1};
+    for (var t = 1; t < target - 1; t++) {
+      indexes.add((t * step).round().clamp(0, count - 1));
+    }
+    return indexes;
   }
 
   String _formatValue(double v) {
@@ -980,29 +1380,64 @@ class _NutritionBarChartPainter extends CustomPainter {
     return v.toStringAsFixed(0);
   }
 
-  String _shortLabel(String label) {
-    if (label.contains('W')) return label.split('-').last;
-    final parts = label.split('-');
-    if (parts.length == 3) {
-      const months = [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-      ];
-      final m = int.tryParse(parts[1]) ?? 1;
-      return "${months[m.clamp(1, 12) - 1]} ${int.tryParse(parts[2]) ?? ''}";
+  String _shortLabel(String label, {bool dense = false}) {
+    if (label.isEmpty) return '';
+
+    // ISO datetime → HH:mm (day view)
+    if (label.contains('T')) {
+      try {
+        final dt = DateTime.parse(label);
+        // For dense hour charts, prefer compact hour
+        if (dense) return '${dt.hour}h';
+        return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      } catch (_) {
+        final parts = label.split('T');
+        if (parts.length > 1 && parts[1].length >= 2) {
+          final hour = parts[1].split(':').first;
+          return dense ? '${int.tryParse(hour) ?? hour}h' : '${hour.padLeft(2, '0')}:00';
+        }
+      }
     }
-    if (parts.length == 2) {
+
+    // Week-style labels
+    if (label.toUpperCase().contains('W') && label.contains('-')) {
+      return label.split('-').last;
+    }
+
+    // YYYY-MM-DD → "16" when dense, "Jul 16" otherwise
+    final dateParts = label.split('-');
+    if (dateParts.length >= 3) {
       const months = [
         'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
         'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
       ];
-      final m = int.tryParse(parts[1]) ?? 1;
-      return months[m.clamp(1, 12) - 1];
+      final m = int.tryParse(dateParts[1]) ?? 1;
+      final dayRaw = dateParts[2].split(RegExp(r'[T\s]')).first;
+      final day = int.tryParse(dayRaw) ?? 0;
+      if (dense) return day > 0 ? '$day' : months[(m.clamp(1, 12)) - 1];
+      return '${months[(m.clamp(1, 12)) - 1]} $day';
+    }
+
+    // YYYY-MM
+    if (dateParts.length == 2) {
+      const months = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      ];
+      final m = int.tryParse(dateParts[1]) ?? 1;
+      return months[(m.clamp(1, 12)) - 1];
+    }
+
+    if (label.length > (dense ? 4 : 6)) {
+      return label.substring(0, dense ? 4 : 6);
     }
     return label;
   }
 
   @override
   bool shouldRepaint(covariant _NutritionBarChartPainter old) =>
-      old.animProgress != animProgress || old.data != data;
+      old.animProgress != animProgress ||
+      old.data != data ||
+      old.metricKey != metricKey ||
+      old.isDark != isDark;
 }

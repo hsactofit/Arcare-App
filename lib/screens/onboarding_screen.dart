@@ -21,7 +21,8 @@ class OnboardingScreen extends StatefulWidget {
   State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
-class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerProviderStateMixin {
+class _OnboardingScreenState extends State<OnboardingScreen>
+    with SingleTickerProviderStateMixin {
   late final PageController _pageController;
   late int _currentPage;
   final int _totalPages = 5;
@@ -108,7 +109,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
     }
   }
 
-
   // Handle goals grid toggle
   void _toggleGoal(String goal) {
     setState(() {
@@ -140,7 +140,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Failed to grant health permissions. Skip or try again."),
+          content: Text(
+            "Failed to grant health permissions. Skip or try again.",
+          ),
           backgroundColor: Colors.orange,
         ),
       );
@@ -182,11 +184,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
     final Map<String, dynamic> onboardingData = {
       'onboarding_completed': true,
       'completed_at': DateTime.now().toUtc().toIso8601String(),
-      'auth': {
-        'provider': userProvider,
-        'name': userName,
-        'email': userEmail,
-      },
+      'auth': {'provider': userProvider, 'name': userName, 'email': userEmail},
       'profile': {
         'dob': _dobController.text.trim(),
         'gender': _gender,
@@ -204,8 +202,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
           'challenge_updates': _notifChallenges,
           'rewards': _notifRewards,
           'ai_tips': _notifAiTips,
-        }
-      }
+        },
+      },
     };
 
     try {
@@ -218,7 +216,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
       await prefs.setBool('health_sync_enabled', _healthConnected);
 
       if (!mounted) return;
-      
+
       // Redirect to MainShell (the main app screen)
       Navigator.pushReplacement(
         context,
@@ -231,7 +229,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("Failed to submit onboarding to server: ${e.toString().replaceAll('Exception: ', '')}"),
+          content: Text(
+            "Failed to submit onboarding to server: ${e.toString().replaceAll('Exception: ', '')}",
+          ),
           backgroundColor: Colors.redAccent,
           duration: const Duration(seconds: 5),
         ),
@@ -272,7 +272,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
                           shape: BoxShape.circle,
                           gradient: RadialGradient(
                             colors: [
-                              isDark ? Colors.blue.withOpacity(0.22) : Colors.cyan.withOpacity(0.35),
+                              isDark
+                                  ? Colors.blue.withOpacity(0.22)
+                                  : Colors.cyan.withOpacity(0.35),
                               Colors.blue.withOpacity(0.0),
                             ],
                           ),
@@ -290,7 +292,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
                           shape: BoxShape.circle,
                           gradient: RadialGradient(
                             colors: [
-                              isDark ? Colors.purple.withOpacity(0.16) : Colors.pink.withOpacity(0.28),
+                              isDark
+                                  ? Colors.purple.withOpacity(0.16)
+                                  : Colors.pink.withOpacity(0.28),
                               Colors.purple.withOpacity(0.0),
                             ],
                           ),
@@ -308,7 +312,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
                           shape: BoxShape.circle,
                           gradient: RadialGradient(
                             colors: [
-                              isDark ? Colors.teal.withOpacity(0.12) : Colors.amber.withOpacity(0.24),
+                              isDark
+                                  ? Colors.teal.withOpacity(0.12)
+                                  : Colors.amber.withOpacity(0.24),
                               Colors.teal.withOpacity(0.0),
                             ],
                           ),
@@ -328,9 +334,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
                           child: Container(
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: isDark ? Colors.white.withOpacity(0.04) : Colors.white.withOpacity(0.45),
+                              color: isDark
+                                  ? Colors.white.withOpacity(0.04)
+                                  : Colors.white.withOpacity(0.45),
                               border: Border.all(
-                                color: isDark ? Colors.white.withOpacity(0.08) : Colors.white.withOpacity(0.65),
+                                color: isDark
+                                    ? Colors.white.withOpacity(0.08)
+                                    : Colors.white.withOpacity(0.65),
                                 width: 1.2,
                               ),
                             ),
@@ -351,9 +361,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
                           child: Container(
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: isDark ? Colors.white.withOpacity(0.03) : Colors.white.withOpacity(0.4),
+                              color: isDark
+                                  ? Colors.white.withOpacity(0.03)
+                                  : Colors.white.withOpacity(0.4),
                               border: Border.all(
-                                color: isDark ? Colors.white.withOpacity(0.06) : Colors.white.withOpacity(0.60),
+                                color: isDark
+                                    ? Colors.white.withOpacity(0.06)
+                                    : Colors.white.withOpacity(0.60),
                                 width: 1.2,
                               ),
                             ),
@@ -392,9 +406,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
                           child: Container(
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: isDark ? Colors.white.withOpacity(0.05) : Colors.white.withOpacity(0.5),
+                              color: isDark
+                                  ? Colors.white.withOpacity(0.05)
+                                  : Colors.white.withOpacity(0.5),
                               border: Border.all(
-                                color: isDark ? Colors.white.withOpacity(0.1) : Colors.white.withOpacity(0.7),
+                                color: isDark
+                                    ? Colors.white.withOpacity(0.1)
+                                    : Colors.white.withOpacity(0.7),
                                 width: 1,
                               ),
                             ),
@@ -414,13 +432,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
               children: [
                 // Floating Frosted-Glass Header
                 Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                   decoration: BoxDecoration(
-                    color: isDark ? Colors.white.withOpacity(0.035) : Colors.black.withOpacity(0.015),
+                    color: isDark
+                        ? Colors.white.withOpacity(0.035)
+                        : Colors.black.withOpacity(0.015),
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(
-                      color: isDark ? Colors.white.withOpacity(0.07) : Colors.black.withOpacity(0.04),
+                      color: isDark
+                          ? Colors.white.withOpacity(0.07)
+                          : Colors.black.withOpacity(0.04),
                     ),
                   ),
                   child: Row(
@@ -431,7 +459,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
                           const Text("✨", style: TextStyle(fontSize: 16)),
                           const SizedBox(width: 8),
                           Text(
-                            "WellnessConnect",
+                            "Medifit Wellness",
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w800,
@@ -452,7 +480,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
                             height: 6,
                             width: isActive ? 18 : 6,
                             decoration: BoxDecoration(
-                              color: isActive ? Colors.blueAccent : (isDark ? Colors.white24 : Colors.black12),
+                              color: isActive
+                                  ? Colors.blueAccent
+                                  : (isDark ? Colors.white24 : Colors.black12),
                               borderRadius: BorderRadius.circular(3),
                             ),
                           );
@@ -508,12 +538,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
                         notifRewards: _notifRewards,
                         notifAiTips: _notifAiTips,
                         onDailyChanged: (v) => setState(() => _notifDaily = v),
-                        onHydrationChanged: (v) => setState(() => _notifHydration = v),
-                        onActivityChanged: (v) => setState(() => _notifActivity = v),
+                        onHydrationChanged: (v) =>
+                            setState(() => _notifHydration = v),
+                        onActivityChanged: (v) =>
+                            setState(() => _notifActivity = v),
                         onSleepChanged: (v) => setState(() => _notifSleep = v),
-                        onChallengesChanged: (v) => setState(() => _notifChallenges = v),
-                        onRewardsChanged: (v) => setState(() => _notifRewards = v),
-                        onAiTipsChanged: (v) => setState(() => _notifAiTips = v),
+                        onChallengesChanged: (v) =>
+                            setState(() => _notifChallenges = v),
+                        onRewardsChanged: (v) =>
+                            setState(() => _notifRewards = v),
+                        onAiTipsChanged: (v) =>
+                            setState(() => _notifAiTips = v),
                         onBack: _prevPage,
                         onNext: _startSyncAndFinish,
                       ),
