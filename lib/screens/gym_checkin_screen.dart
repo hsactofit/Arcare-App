@@ -6,7 +6,6 @@ import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/auth_service.dart';
-import '../services/health_service.dart';
 import '../widgets/glass_card.dart';
 
 class GymCheckinScreen extends StatefulWidget {
@@ -22,7 +21,6 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
   String? _gymName;
   String? _gymPlace;
   DateTime? _checkInTime;
-  String? _sessionId;
   
   bool _isLoading = false;
   Timer? _timer;
@@ -30,7 +28,6 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
 
   // Camera permission tracking
   bool _cameraPermissionGranted = false;
-  bool _checkingPermission = true;
 
   // Real Camera barcode/QR scanner controller
   MobileScannerController? _scannerController;
@@ -40,11 +37,7 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
   late Animation<double> _scannerLinePosition;
 
   // Checkout exercise logging
-  final List<Map<String, dynamic>> _loggedExercises = [
-    {"name": "Bench Press", "sets": 4},
-    {"name": "Squats", "sets": 3},
-    {"name": "Treadmill Running", "sets": 2},
-  ];
+  final List<Map<String, dynamic>> _loggedExercises = [];
 
   final List<String> _popularExercises = [
     "Bench Press",
@@ -89,7 +82,6 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
     if (mounted) {
       setState(() {
         _cameraPermissionGranted = status.isGranted;
-        _checkingPermission = false;
       });
       if (status.isGranted) {
         _initScanner();
@@ -124,7 +116,6 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
       final name = prefs.getString('gym_name');
       final place = prefs.getString('gym_place');
       final timeStr = prefs.getString('gym_check_in_time');
-      final sessId = prefs.getString('gym_session_id');
       final checkInTime = timeStr != null ? DateTime.tryParse(timeStr) : null;
 
       setState(() {
@@ -132,9 +123,34 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
         _gymName = name;
         _gymPlace = place;
         _checkInTime = checkInTime;
-        _sessionId = sessId;
       });
       _startTimer();
+      await _loadLoggedExercises();
+    }
+  }
+
+  Future<void> _saveLoggedExercises() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('gym_logged_exercises', jsonEncode(_loggedExercises));
+    } catch (e) {
+      debugPrint("Error saving logged exercises: $e");
+    }
+  }
+
+  Future<void> _loadLoggedExercises() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString('gym_logged_exercises');
+      if (jsonStr != null) {
+        final List<dynamic> decoded = jsonDecode(jsonStr);
+        setState(() {
+          _loggedExercises.clear();
+          _loggedExercises.addAll(decoded.map((e) => Map<String, dynamic>.from(e as Map)));
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading logged exercises: $e");
     }
   }
 
@@ -220,7 +236,6 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
           _gymName = gymName;
           _gymPlace = gymPlace;
           _checkInTime = checkInTime;
-          _sessionId = sessId;
         });
 
         _startTimer();
@@ -299,12 +314,18 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
       debugPrint("===========================================================");
 
       if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+        final checkoutTimeStr = data['check_out_time'] as String? ?? DateTime.now().toIso8601String();
+
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('gym_checked_in');
         await prefs.remove('gym_name');
         await prefs.remove('gym_place');
         await prefs.remove('gym_check_in_time');
         await prefs.remove('gym_session_id');
+        await prefs.remove('gym_logged_exercises');
+
+        await prefs.setString('gym_check_out_time', checkoutTimeStr);
 
         // Mark that gym is done today to prevent showing the dashboard widget again today
         final todayStr = DateTime.now().toIso8601String().substring(0, 10);
@@ -317,8 +338,8 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
           _gymName = null;
           _gymPlace = null;
           _checkInTime = null;
-          _sessionId = null;
           _elapsed = Duration.zero;
+          _loggedExercises.clear();
         });
 
         widget.onStatusChanged?.call();
@@ -525,6 +546,7 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
                         setState(() {
                           _loggedExercises.add({"name": name, "sets": sets});
                         });
+                        _saveLoggedExercises();
                         Navigator.pop(context);
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -632,6 +654,7 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
                                     _loggedExercises.removeAt(index);
                                   });
                                   setState(() {});
+                                  _saveLoggedExercises();
                                 },
                               ),
                             ),
@@ -748,31 +771,6 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
                               ),
                             ),
                             const SizedBox(height: 16),
-                            // Simulate Check-in for Testing / Fallback
-                            Center(
-                              child: OutlinedButton.icon(
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.blueAccent,
-                                  side: const BorderSide(color: Colors.blueAccent, width: 1.2),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 10,
-                                  ),
-                                ),
-                                onPressed: () {
-                                  _handleCheckin('{"name": "Atham Wellness Gym", "place": "Sector 62, Noida"}');
-                                },
-                                icon: const Icon(Icons.bug_report_outlined, size: 16),
-                                label: const Text(
-                                  "Simulate Check-In (Test QR)",
-                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 24),
                              if (!_cameraPermissionGranted) ...[
                               // Camera permission request state
                               Container(

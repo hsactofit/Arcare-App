@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:health/health.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -406,7 +407,7 @@ class HealthService {
     final savedDate = prefs.getString('local_water_date');
     final savedVal = prefs.getDouble('local_water_intake_today');
     
-    if (savedDate != todayStr || savedVal == null || savedVal == 0.0) {
+    if (savedDate != todayStr || savedVal == null || savedVal == 0.0 || savedVal < apiValue) {
       _localWaterIntake = apiValue;
       await prefs.setDouble('local_water_intake_today', apiValue);
       await prefs.setString('local_water_date', todayStr);
@@ -416,7 +417,42 @@ class HealthService {
     }
   }
 
-  void resetLocalState() async {
+  Future<void> initializeNutritionFromApi({
+    required double apiProtein,
+    required double apiCarbs,
+    required double apiFat,
+    required double apiCalories,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final todayStr = DateTime.now().toIso8601String().substring(0, 10);
+    final savedDate = prefs.getString('local_nutrition_date');
+    
+    final savedProtein = prefs.getDouble('cached_nutrition_protein') ?? 0.0;
+    final savedCarbs = prefs.getDouble('cached_nutrition_carbs') ?? 0.0;
+    final savedFat = prefs.getDouble('cached_nutrition_fat') ?? 0.0;
+    final savedCalories = prefs.getDouble('cached_nutrition_calories') ?? 0.0;
+
+    if (savedDate != todayStr ||
+        savedProtein == 0.0 || savedProtein < apiProtein ||
+        savedCarbs == 0.0 || savedCarbs < apiCarbs ||
+        savedFat == 0.0 || savedFat < apiFat ||
+        savedCalories == 0.0 || savedCalories < apiCalories) {
+      
+      final double finalProtein = savedDate != todayStr ? apiProtein : max(savedProtein, apiProtein);
+      final double finalCarbs = savedDate != todayStr ? apiCarbs : max(savedCarbs, apiCarbs);
+      final double finalFat = savedDate != todayStr ? apiFat : max(savedFat, apiFat);
+      final double finalCalories = savedDate != todayStr ? apiCalories : max(savedCalories, apiCalories);
+
+      await prefs.setDouble('cached_nutrition_protein', finalProtein);
+      await prefs.setDouble('cached_nutrition_carbs', finalCarbs);
+      await prefs.setDouble('cached_nutrition_fat', finalFat);
+      await prefs.setDouble('cached_nutrition_calories', finalCalories);
+      await prefs.setString('local_nutrition_date', todayStr);
+      debugPrint("Initialized/updated local nutrition cache from API");
+    }
+  }
+
+  Future<void> resetLocalState() async {
     _localWaterIntake = null;
     _cachedHealthData = null;
     _lastFetchTime = null;
@@ -424,13 +460,60 @@ class HealthService {
     _lastDailyFetchTime = null;
     _cachedDailyDays = null;
     final prefs = await SharedPreferences.getInstance();
+    
+    // Clear water keys
     await prefs.remove('local_water_intake_today');
     await prefs.remove('local_water_date');
+
+    // Clear health cache keys
     await prefs.remove('cached_health_data_object');
     await prefs.remove('cached_health_data_time');
     await prefs.remove('cached_daily_records_list');
     await prefs.remove('cached_daily_records_time');
     await prefs.remove('cached_daily_records_days');
+
+    // Clear nutrition keys
+    await prefs.remove('cached_nutrition_calories');
+    await prefs.remove('cached_nutrition_carbs');
+    await prefs.remove('cached_nutrition_protein');
+    await prefs.remove('cached_nutrition_fat');
+    await prefs.remove('local_nutrition_date');
+
+    // Clear dashboard wellness score caches
+    await prefs.remove('cached_wellness_score');
+    await prefs.remove('cached_active_subscore');
+    await prefs.remove('cached_sleep_subscore');
+    await prefs.remove('cached_nutrition_subscore');
+    await prefs.remove('cached_mindfulness_subscore');
+    await prefs.remove('cached_daily_summary');
+    await prefs.remove('cached_recommendations');
+    await prefs.remove('cached_ai_buddy_message');
+    await prefs.remove('last_sync_timestamp');
+
+    // Clear API custom metric caches
+    await prefs.remove('cached_calories_value');
+    await prefs.remove('cached_calories_target');
+    await prefs.remove('cached_calories_status');
+
+    await prefs.remove('cached_sleep_value');
+    await prefs.remove('cached_sleep_target');
+    await prefs.remove('cached_sleep_status');
+
+    await prefs.remove('cached_heart_rate_value');
+    await prefs.remove('cached_heart_rate_target');
+    await prefs.remove('cached_heart_rate_status');
+    await prefs.remove('cached_dashboard_metrics_date');
+
+    // Clear gym keys
+    await prefs.remove('gym_checked_in');
+    await prefs.remove('gym_name');
+    await prefs.remove('gym_place');
+    await prefs.remove('gym_check_in_time');
+    await prefs.remove('gym_check_out_time');
+    await prefs.remove('gym_session_id');
+    await prefs.remove('gym_logged_exercises');
+    await prefs.remove('gym_done_today_date');
+
     debugPrint("Local health service water state reset.");
   }
 

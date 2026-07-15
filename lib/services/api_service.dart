@@ -37,6 +37,61 @@ class ApiService {
     return response;
   }
 
+  /// Helper to make authenticated POST requests with automatic token refresh.
+  Future<http.Response> _post(String path, {Object? body}) async {
+    final token = await AuthService.instance.getAccessToken();
+    final uri = Uri.parse('$baseUrl$path');
+
+    var response = await http.post(uri,
+        headers: await _getHeaders(token: token),
+        body: body != null ? jsonEncode(body) : null);
+
+    if (response.statusCode == 401) {
+      await AuthService.instance.refreshSessionToken();
+      final newToken = await AuthService.instance.getAccessToken();
+      response = await http.post(uri,
+          headers: await _getHeaders(token: newToken),
+          body: body != null ? jsonEncode(body) : null);
+    }
+    return response;
+  }
+
+  /// Helper to make authenticated PUT requests with automatic token refresh.
+  Future<http.Response> _put(String path, {Object? body}) async {
+    final token = await AuthService.instance.getAccessToken();
+    final uri = Uri.parse('$baseUrl$path');
+
+    var response = await http.put(uri,
+        headers: await _getHeaders(token: token),
+        body: body != null ? jsonEncode(body) : null);
+
+    if (response.statusCode == 401) {
+      await AuthService.instance.refreshSessionToken();
+      final newToken = await AuthService.instance.getAccessToken();
+      response = await http.put(uri,
+          headers: await _getHeaders(token: newToken),
+          body: body != null ? jsonEncode(body) : null);
+    }
+    return response;
+  }
+
+  /// Helper to make authenticated DELETE requests with automatic token refresh.
+  Future<http.Response> _delete(String path) async {
+    final token = await AuthService.instance.getAccessToken();
+    final uri = Uri.parse('$baseUrl$path');
+
+    var response =
+        await http.delete(uri, headers: await _getHeaders(token: token));
+
+    if (response.statusCode == 401) {
+      await AuthService.instance.refreshSessionToken();
+      final newToken = await AuthService.instance.getAccessToken();
+      response =
+          await http.delete(uri, headers: await _getHeaders(token: newToken));
+    }
+    return response;
+  }
+
   /// Fetch user's email from onboarding state.
   Future<String> getUserEmail() async {
     final prefs = await SharedPreferences.getInstance();
@@ -155,6 +210,75 @@ class ApiService {
       return parsed.where((c) => c.isJoined).toList();
     } else {
       throw Exception("Failed to fetch challenges: ${response.statusCode}");
+    }
+  }
+
+  // ── Nutrition API ──────────────────────────────────────────────
+
+  /// GET /api/nutrition/logs/{email}
+  Future<Map<String, dynamic>> fetchNutritionLogs(String email) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get('/api/nutrition/logs/$encodedEmail');
+
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception(
+          "Failed to load nutrition logs: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// POST /api/nutrition/log/{email}
+  Future<Map<String, dynamic>> addNutritionLog(
+      String email, Map<String, dynamic> body) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _post('/api/nutrition/log/$encodedEmail', body: body);
+
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception(
+          "Failed to add nutrition log: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// PUT /api/nutrition/log/{logId}
+  Future<Map<String, dynamic>> updateNutritionLog(
+      int logId, Map<String, dynamic> body) async {
+    final response = await _put('/api/nutrition/log/$logId', body: body);
+
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception(
+          "Failed to update nutrition log: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// DELETE /api/nutrition/log/{logId}
+  Future<void> deleteNutritionLog(int logId) async {
+    final response = await _delete('/api/nutrition/log/$logId');
+
+    if (response.statusCode != 200) {
+      throw Exception(
+          "Failed to delete nutrition log: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// GET /api/nutrition/graph/{email}?period=
+  Future<Map<String, dynamic>> fetchNutritionGraph(
+      String email, String period) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get(
+      '/api/nutrition/graph/$encodedEmail',
+      queryParams: {'period': period},
+    );
+
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } else {
+      throw Exception(
+          "Failed to load nutrition graph: ${response.statusCode} - ${response.body}");
     }
   }
 }

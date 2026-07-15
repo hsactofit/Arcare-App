@@ -21,6 +21,7 @@ import 'water_logging_screen.dart';
 import 'metric_detail_screen.dart';
 import 'gym_checkin_screen.dart';
 import 'challenges_screen.dart';
+import 'nutrition_logging_screen.dart';
 import '../widgets/water/wave_painter.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -31,7 +32,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class DashboardScreenState extends State<DashboardScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _waterWaveController;
   final List<BubbleParticle> _waterBubbles = [];
   final Random _random = Random();
@@ -79,12 +80,26 @@ class DashboardScreenState extends State<DashboardScreen>
   String _userEmail = "";
   List<Challenge> _activeChallenges = [];
 
+  // Custom API metrics
+  double? _apiCaloriesValue;
+  double? _apiCaloriesTarget;
+  String? _apiCaloriesStatus;
+
+  double? _apiSleepValue;
+  double? _apiSleepTarget;
+  String? _apiSleepStatus;
+
+  double? _apiHeartRateValue;
+  double? _apiHeartRateTarget;
+  String? _apiHeartRateStatus;
+
   ScrollController? _activeGoalsScrollController;
   Timer? _activeGoalsScrollTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSetupState();
     _loadGymState();
     _dailyRecordsFuture = HealthService.instance.fetchDailyHealthDataForPeriod(
@@ -112,12 +127,21 @@ class DashboardScreenState extends State<DashboardScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _gymTimer?.cancel();
     _activeGoalsScrollTimer?.cancel();
     _activeGoalsScrollController?.dispose();
     _waterWaveController.removeListener(_updateWaterBubbles);
     _waterWaveController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      debugPrint("App resumed: fetching fresh dashboard metrics");
+      _fetchRealData(forceSync: true);
+    }
   }
 
   void _updateWaterBubbles() {
@@ -581,12 +605,39 @@ class DashboardScreenState extends State<DashboardScreen>
     });
     try {
       // 1. Always load the active local Health Connect data to update the UI cards
-      final data = await HealthService.instance.fetchHealthData();
+      var data = await HealthService.instance.fetchHealthData();
+      final prefs = await SharedPreferences.getInstance();
+
+      final todayStr = DateTime.now().toIso8601String().substring(0, 10);
+      final savedNutriDate = prefs.getString('local_nutrition_date');
+      double cachedCal = 0.0;
+      double cachedCarbs = 0.0;
+      double cachedProtein = 0.0;
+      double cachedFat = 0.0;
+
+      if (savedNutriDate == todayStr) {
+        cachedCal = prefs.getDouble('cached_nutrition_calories') ?? 0.0;
+        cachedCarbs = prefs.getDouble('cached_nutrition_carbs') ?? 0.0;
+        cachedProtein = prefs.getDouble('cached_nutrition_protein') ?? 0.0;
+        cachedFat = prefs.getDouble('cached_nutrition_fat') ?? 0.0;
+      } else {
+        await prefs.setDouble('cached_nutrition_calories', 0.0);
+        await prefs.setDouble('cached_nutrition_carbs', 0.0);
+        await prefs.setDouble('cached_nutrition_protein', 0.0);
+        await prefs.setDouble('cached_nutrition_fat', 0.0);
+        await prefs.setString('local_nutrition_date', todayStr);
+      }
+
+      data = data.copyWith(
+        nutritionCalories: cachedCal,
+        carbs: cachedCarbs,
+        protein: cachedProtein,
+        fat: cachedFat,
+      );
+
       setState(() {
         _healthData = data;
       });
-
-      final prefs = await SharedPreferences.getInstance();
 
       // 2. Populate states from the local cache immediately for an instant load
       setState(() {
@@ -622,7 +673,82 @@ class DashboardScreenState extends State<DashboardScreen>
           final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
           _userEmail = onboarding['auth']?['email'] ?? "";
         }
+
+        // Load custom API metrics or reset them at midnight
+        final savedMetricsDate = prefs.getString('cached_dashboard_metrics_date');
+        if (savedMetricsDate == todayStr) {
+          _apiCaloriesValue = prefs.getDouble('cached_calories_value');
+          _apiCaloriesTarget = prefs.getDouble('cached_calories_target');
+          _apiCaloriesStatus = prefs.getString('cached_calories_status');
+
+          _apiSleepValue = prefs.getDouble('cached_sleep_value');
+          _apiSleepTarget = prefs.getDouble('cached_sleep_target');
+          _apiSleepStatus = prefs.getString('cached_sleep_status');
+
+          _apiHeartRateValue = prefs.getDouble('cached_heart_rate_value');
+          _apiHeartRateTarget = prefs.getDouble('cached_heart_rate_target');
+          _apiHeartRateStatus = prefs.getString('cached_heart_rate_status');
+        } else {
+          _apiCaloriesValue = null;
+          _apiCaloriesTarget = null;
+          _apiCaloriesStatus = null;
+
+          _apiSleepValue = null;
+          _apiSleepTarget = null;
+          _apiSleepStatus = null;
+
+          _apiHeartRateValue = null;
+          _apiHeartRateTarget = null;
+          _apiHeartRateStatus = null;
+
+          prefs.remove('cached_calories_value');
+          prefs.remove('cached_calories_target');
+          prefs.remove('cached_calories_status');
+
+          prefs.remove('cached_sleep_value');
+          prefs.remove('cached_sleep_target');
+          prefs.remove('cached_sleep_status');
+
+          prefs.remove('cached_heart_rate_value');
+          prefs.remove('cached_heart_rate_target');
+          prefs.remove('cached_heart_rate_status');
+
+          prefs.setString('cached_dashboard_metrics_date', todayStr);
+        }
       });
+
+      // Fetch fresh nutrition from the API and update state/cache
+      if (_userEmail.isNotEmpty) {
+        try {
+          final nutritionResult =
+              await ApiService.instance.fetchNutritionLogs(_userEmail);
+          final double apiCal =
+              (nutritionResult['calories_today'] as num?)?.toDouble() ?? 0.0;
+          final double apiCarbs =
+              (nutritionResult['carbs_today'] as num?)?.toDouble() ?? 0.0;
+          final double apiProtein =
+              (nutritionResult['protein_today'] as num?)?.toDouble() ?? 0.0;
+          final double apiFat =
+              (nutritionResult['fat_today'] as num?)?.toDouble() ?? 0.0;
+
+          setState(() {
+            _healthData = _healthData.copyWith(
+              nutritionCalories: apiCal,
+              carbs: apiCarbs,
+              protein: apiProtein,
+              fat: apiFat,
+            );
+          });
+
+          await prefs.setDouble('cached_nutrition_calories', apiCal);
+          await prefs.setDouble('cached_nutrition_carbs', apiCarbs);
+          await prefs.setDouble('cached_nutrition_protein', apiProtein);
+          await prefs.setDouble('cached_nutrition_fat', apiFat);
+          await prefs.setString('local_nutrition_date', todayStr);
+        } catch (e) {
+          debugPrint("Error fetching nutrition from API for dashboard: $e");
+        }
+      }
 
       await _fetchActiveChallenges();
       await _loadGymState();
@@ -730,7 +856,129 @@ class DashboardScreenState extends State<DashboardScreen>
             apiWaterToday.toDouble(),
           );
 
+          // Extract & Initialize Nutrition macros from dashboard sync response
+          final double apiProtein = (resData['protein_today'] as num?)?.toDouble() ?? 0.0;
+          final double apiCarbs = (resData['carbs_today'] as num?)?.toDouble() ?? 0.0;
+          final double apiFat = (resData['fat_today'] as num?)?.toDouble() ?? 0.0;
+          final double apiNutriCal = (resData['calories_today'] as num?)?.toDouble() ?? (apiProtein * 4 + apiCarbs * 4 + apiFat * 9);
+
+          await HealthService.instance.initializeNutritionFromApi(
+            apiProtein: apiProtein,
+            apiCarbs: apiCarbs,
+            apiFat: apiFat,
+            apiCalories: apiNutriCal,
+          );
+
+          // Parse Custom API Metrics (Calories Burned, Sleep, Heart Rate) from widgets list
+          double? parsedCalVal;
+          double? parsedCalTarget;
+          String? parsedCalStatus;
+
+          double? parsedSleepVal;
+          double? parsedSleepTarget;
+          String? parsedSleepStatus;
+
+          double? parsedHeartVal;
+          double? parsedHeartTarget;
+          String? parsedHeartStatus;
+
+          final List<dynamic> widgetsData = resData['widgets'] ?? [];
+
+          // Calories Burned
+          final calWidget = widgetsData.firstWhere(
+            (w) => w['title'] == 'Calories Burned',
+            orElse: () => null,
+          );
+          if (calWidget != null) {
+            parsedCalVal = double.tryParse(calWidget['value']?.toString() ?? '');
+            parsedCalTarget = double.tryParse(calWidget['target']?.toString() ?? '');
+            parsedCalStatus = calWidget['status']?.toString();
+          } else {
+            parsedCalVal = (resData['calories_burned_today'] ?? resData['calories_today'] ?? resData['active_calories'])?.toDouble();
+            parsedCalTarget = (resData['calories_target'] ?? resData['calorie_goal'])?.toDouble();
+            parsedCalStatus = resData['calories_status']?.toString();
+          }
+
+          // Sleep Duration
+          final sleepWidget = widgetsData.firstWhere(
+            (w) => w['title'] == 'Sleep Duration',
+            orElse: () => null,
+          );
+          if (sleepWidget != null) {
+            parsedSleepVal = double.tryParse(sleepWidget['value']?.toString() ?? '');
+            parsedSleepTarget = double.tryParse(sleepWidget['target']?.toString() ?? '');
+            parsedSleepStatus = sleepWidget['status']?.toString();
+          } else {
+            parsedSleepVal = (resData['sleep_today'] ?? resData['sleep_hours'] ?? resData['sleep_duration'])?.toDouble();
+            parsedSleepTarget = (resData['sleep_target'] ?? resData['sleep_goal'])?.toDouble();
+            parsedSleepStatus = resData['sleep_status']?.toString();
+          }
+
+          // Heart Rate
+          final hrWidget = widgetsData.firstWhere(
+            (w) => w['title'] == 'Heart Rate',
+            orElse: () => null,
+          );
+          if (hrWidget != null) {
+            parsedHeartVal = double.tryParse(hrWidget['value']?.toString() ?? '');
+            parsedHeartStatus = hrWidget['status']?.toString();
+            final targetStr = hrWidget['target']?.toString() ?? '';
+            if (targetStr.contains('-')) {
+              parsedHeartTarget = double.tryParse(targetStr.split('-')[0]);
+            } else {
+              parsedHeartTarget = double.tryParse(targetStr);
+            }
+          } else {
+            parsedHeartVal = (resData['heart_rate_today'] ?? resData['heart_rate_bpm'] ?? resData['pulse'])?.toDouble();
+            parsedHeartTarget = (resData['heart_rate_target'] ?? resData['heart_rate_goal'])?.toDouble();
+            parsedHeartStatus = resData['heart_rate_status']?.toString();
+          }
+
+          // Parse and Sync gym session from API response
+          if (resData['latest_gym_session'] != null) {
+            final gym = resData['latest_gym_session'];
+            final checkInTimeStr = gym['check_in_time']?.toString();
+            final checkOutTimeStr = gym['check_out_time']?.toString();
+            final gymName = gym['gym_name']?.toString() ?? "Gold's Gym";
+            final gymId = gym['id']?.toString() ?? "";
+
+            if (checkOutTimeStr == null || checkOutTimeStr.isEmpty) {
+              await prefs.setBool('gym_checked_in', true);
+              await prefs.setString('gym_name', gymName);
+              await prefs.setString('gym_place', gymName);
+              if (checkInTimeStr != null) {
+                await prefs.setString('gym_check_in_time', checkInTimeStr);
+              }
+              await prefs.setString('gym_session_id', gymId);
+              await prefs.remove('gym_check_out_time');
+            } else {
+              await prefs.remove('gym_checked_in');
+              await prefs.remove('gym_name');
+              await prefs.remove('gym_place');
+              await prefs.remove('gym_check_in_time');
+              await prefs.remove('gym_session_id');
+              await prefs.remove('gym_logged_exercises');
+              
+              await prefs.setString('gym_check_out_time', checkOutTimeStr);
+              final checkOutDate = checkOutTimeStr.substring(0, 10);
+              await prefs.setString('gym_done_today_date', checkOutDate);
+            }
+            await _loadGymState();
+          }
+
           setState(() {
+            _apiCaloriesValue = parsedCalVal;
+            _apiCaloriesTarget = parsedCalTarget;
+            _apiCaloriesStatus = parsedCalStatus;
+
+            _apiSleepValue = parsedSleepVal;
+            _apiSleepTarget = parsedSleepTarget;
+            _apiSleepStatus = parsedSleepStatus;
+
+            _apiHeartRateValue = parsedHeartVal;
+            _apiHeartRateTarget = parsedHeartTarget;
+            _apiHeartRateStatus = parsedHeartStatus;
+
             _serverWellnessScore = score;
             _serverDailySummary = summary;
             _serverRecommendations = recs;
@@ -754,6 +1002,21 @@ class DashboardScreenState extends State<DashboardScreen>
             'last_sync_timestamp',
             _lastSynced!.toIso8601String(),
           );
+
+          // Save custom metrics to persistent cache
+          final todayStr = DateTime.now().toIso8601String().substring(0, 10);
+          await prefs.setString('cached_dashboard_metrics_date', todayStr);
+          if (_apiCaloriesValue != null) await prefs.setDouble('cached_calories_value', _apiCaloriesValue!);
+          if (_apiCaloriesTarget != null) await prefs.setDouble('cached_calories_target', _apiCaloriesTarget!);
+          if (_apiCaloriesStatus != null) await prefs.setString('cached_calories_status', _apiCaloriesStatus!);
+
+          if (_apiSleepValue != null) await prefs.setDouble('cached_sleep_value', _apiSleepValue!);
+          if (_apiSleepTarget != null) await prefs.setDouble('cached_sleep_target', _apiSleepTarget!);
+          if (_apiSleepStatus != null) await prefs.setString('cached_sleep_status', _apiSleepStatus!);
+
+          if (_apiHeartRateValue != null) await prefs.setDouble('cached_heart_rate_value', _apiHeartRateValue!);
+          if (_apiHeartRateTarget != null) await prefs.setDouble('cached_heart_rate_target', _apiHeartRateTarget!);
+          if (_apiHeartRateStatus != null) await prefs.setString('cached_heart_rate_status', _apiHeartRateStatus!);
 
           debugPrint(
             "Successfully executed merged sync and updated local dashboard cache.",
@@ -2568,68 +2831,93 @@ class DashboardScreenState extends State<DashboardScreen>
     return SliverToBoxAdapter(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: GlassCard(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Row(
-                children: [
-                  Text("🍎", style: TextStyle(fontSize: 28)),
-                  SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Nutrition Summary",
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
+        child: GestureDetector(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => NutritionLoggingScreen(
+                  onFoodLogged: () {
+                    _fetchRealData(forceSync: true);
+                  },
+                ),
+              ),
+            );
+          },
+          child: GlassCard(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Text("🍎", style: TextStyle(fontSize: 28)),
+                    SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Nutrition Summary",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                          ),
                         ),
-                      ),
-                      Text(
-                        "Today's macros and intake",
-                        style: TextStyle(color: Colors.grey, fontSize: 12),
-                      ),
-                    ],
+                        Text(
+                          "Today's macros and intake",
+                          style: TextStyle(color: Colors.grey, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      "Calories",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      "${_healthData.nutritionCalories.round()} kcal",
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _macroElement(
+                      "Carbs",
+                      "${_healthData.carbs.round()}g",
+                      Colors.blue,
+                    ),
+                    _macroElement(
+                      "Protein",
+                      "${_healthData.protein.round()}g",
+                      Colors.green,
+                    ),
+                    _macroElement(
+                      "Fat",
+                      "${_healthData.fat.round()}g",
+                      Colors.orange,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Center(
+                  child: Text(
+                    "Tap to log food ›",
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.orangeAccent.withOpacity(0.8),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    "Calories",
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    "${_healthData.nutritionCalories.round()} kcal",
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  _macroElement(
-                    "Carbs",
-                    "${_healthData.carbs.round()}g",
-                    Colors.blue,
-                  ),
-                  _macroElement(
-                    "Protein",
-                    "${_healthData.protein.round()}g",
-                    Colors.green,
-                  ),
-                  _macroElement(
-                    "Fat",
-                    "${_healthData.fat.round()}g",
-                    Colors.orange,
-                  ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -2986,6 +3274,7 @@ class DashboardScreenState extends State<DashboardScreen>
     bool isDark,
     double bpm,
     double restingBpm,
+    String? status,
     VoidCallback onTap,
   ) {
     final gradient = isDark
@@ -3093,7 +3382,7 @@ class DashboardScreenState extends State<DashboardScreen>
                           ],
                         ),
                         child: Text(
-                          "Resting: ${restingBpm > 0 ? restingBpm.round() : '--'}",
+                          "Resting: ${restingBpm > 0 ? restingBpm.round() : '--'}${status != null && status.isNotEmpty ? ' • $status' : ''}",
                           style: const TextStyle(
                             fontSize: 9.5,
                             fontWeight: FontWeight.w900,
@@ -3117,6 +3406,7 @@ class DashboardScreenState extends State<DashboardScreen>
     bool isDark,
     double calories,
     double goal,
+    String? status,
     VoidCallback onTap,
   ) {
     final gradient = isDark
@@ -3199,13 +3489,27 @@ class DashboardScreenState extends State<DashboardScreen>
                     ),
                   ],
                 ),
-                Text(
-                  "Goal: ${goal.round()}",
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFFE08200),
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      "Goal: ${goal.round()}",
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFFE08200),
+                      ),
+                    ),
+                    if (status != null && status.isNotEmpty)
+                      Text(
+                        status,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w900,
+                          color: isDark ? Colors.white60 : Colors.black54,
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -3219,6 +3523,7 @@ class DashboardScreenState extends State<DashboardScreen>
     bool isDark,
     double sleepHours,
     double goal,
+    String? status,
     VoidCallback onTap,
   ) {
     final gradient = isDark
@@ -3304,13 +3609,33 @@ class DashboardScreenState extends State<DashboardScreen>
                           ),
                         ],
                       ),
-                      Text(
-                        "Goal: ${goal.round()}h",
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: isDark ? Colors.white30 : Colors.black45,
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "Goal: ${goal.round()}h",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white30 : Colors.black45,
+                            ),
+                          ),
+                          if (status != null && status.isNotEmpty) ...[
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                status,
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: isDark ? Colors.white60 : Colors.black54,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.end,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ),
@@ -3489,10 +3814,12 @@ class DashboardScreenState extends State<DashboardScreen>
                                 flex: 2,
                                 child: _buildHeartRateCard(
                                   isDark,
-                                  _healthData.heartRate,
-                                  _healthData.restingHeartRate > 0
-                                      ? _healthData.restingHeartRate
-                                      : 64.0,
+                                  _apiHeartRateValue ?? _healthData.heartRate,
+                                  _apiHeartRateTarget ??
+                                      (_healthData.restingHeartRate > 0
+                                          ? _healthData.restingHeartRate
+                                          : 64.0),
+                                  _apiHeartRateStatus,
                                   () => _navigateToMetricDetail(
                                     'heart_rate',
                                     'Heart Rate',
@@ -3511,8 +3838,9 @@ class DashboardScreenState extends State<DashboardScreen>
                                 flex: 2,
                                 child: _buildCaloriesCard(
                                   isDark,
-                                  _healthData.activeCalories,
-                                  _calorieGoal,
+                                  _apiCaloriesValue ?? _healthData.activeCalories,
+                                  _apiCaloriesTarget ?? _calorieGoal,
+                                  _apiCaloriesStatus,
                                   () => _navigateToMetricDetail(
                                     'calories',
                                     'Calories',
@@ -3526,8 +3854,9 @@ class DashboardScreenState extends State<DashboardScreen>
                                 flex: 3,
                                 child: _buildSleepCard(
                                   isDark,
-                                  _healthData.sleepDuration,
-                                  _sleepGoal,
+                                  _apiSleepValue ?? _healthData.sleepDuration,
+                                  _apiSleepTarget ?? _sleepGoal,
+                                  _apiSleepStatus,
                                   () => _navigateToMetricDetail(
                                     'sleep',
                                     'Sleep',
@@ -3565,9 +3894,9 @@ class DashboardScreenState extends State<DashboardScreen>
                   ),
 
                   // Active Challenge Card
-                  SliverToBoxAdapter(
-                    child: _buildActiveChallengeCard(theme, isDark),
-                  ),
+                  // SliverToBoxAdapter(
+                  //   child: _buildActiveChallengeCard(theme, isDark),
+                  // ),
 
                   // Your Last 12 Days Graph
                   SliverToBoxAdapter(
@@ -4393,10 +4722,10 @@ class DashboardScreenState extends State<DashboardScreen>
     final borderColor = Colors.indigoAccent.withOpacity(0.35);
 
     return Container(
-      width: isSingleItem ? double.infinity : 210,
+      width: isSingleItem ? double.infinity : 250,
       margin: isSingleItem
           ? const EdgeInsets.symmetric(vertical: 4)
-          : const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          : const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       decoration: BoxDecoration(
         color: cardBg,
         borderRadius: BorderRadius.circular(16),
