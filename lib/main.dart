@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/splash_screen.dart';
+import 'theme/app_theme.dart';
 
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.system);
 
@@ -33,34 +34,12 @@ class MyApp extends StatelessWidget {
       valueListenable: themeNotifier,
       builder: (context, currentThemeMode, _) {
         return MaterialApp(
-          title: 'Wellness Sync',
+          title: 'Medifit Wellness',
           debugShowCheckedModeBanner: false,
           themeMode: currentThemeMode,
-          theme: ThemeData(
-        brightness: Brightness.light,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFFF6D55),
-          brightness: Brightness.light,
-          primary: const Color(0xFFFF6D55),
-          secondary: const Color(0xFF2EE5A3),
-        ),
-        useMaterial3: true,
-        fontFamily: 'SF Pro Rounded', // Beautiful rounded typography matching premium design guidelines
-      ),
-      darkTheme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0A0D10),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFFF6D55),
-          brightness: Brightness.dark,
-          primary: const Color(0xFFFF6D55),
-          secondary: const Color(0xFF2EE5A3),
-          surface: const Color(0xFF0F1318),
-        ),
-        useMaterial3: true,
-        fontFamily: 'SF Pro Rounded',
-      ),
-      home: const SplashScreen(),
+          theme: AppTheme.light(),
+          darkTheme: AppTheme.dark(),
+          home: const SplashScreen(),
         );
       },
     );

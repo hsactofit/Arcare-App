@@ -231,14 +231,13 @@ class _SplashScreenState extends State<SplashScreen>
                   // Tagline only — brand name is already in the logo art
                   Text(
                     "Optimize. Sync. Thrive.",
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: isDark
-                          ? Colors.grey[400]
-                          : const Color(0xFF556677),
-                      letterSpacing: 0.6,
-                    ),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: isDark
+                              ? Colors.grey[400]
+                              : const Color(0xFF556677),
+                          letterSpacing: 0.6,
+                          fontWeight: FontWeight.w600,
+                        ),
                   ),
                   const SizedBox(height: 48),
 

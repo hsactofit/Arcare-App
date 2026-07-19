@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:health/health.dart';
@@ -20,6 +21,11 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  static const Color _accent = Color(0xFFFF6D55);
+  static const Color _mint = Color(0xFF2EE5A3);
+  static const Color _violet = Color(0xFF8F6BFF);
+  static const Color _sky = Color(0xFF5B8CFF);
+
   String _name = "User";
   String _email = "";
   String _dob = "Not set";
@@ -46,16 +52,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _loadProfileData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      
-      // Load health connect status
+
       _hcConnected = prefs.getBool('healthSetupCompleted') ?? false;
 
-      // Fetch latest profile from API
       try {
         final profileData = await ApiService.instance.fetchUserProfile();
         final name = profileData['name'] ?? "User";
         final email = profileData['email'] ?? "";
-        
+
         final profile = profileData['profile'] ?? {};
         final dob = profile['dob'] ?? "Not set";
         final gender = profile['gender'] ?? "Not set";
@@ -63,22 +67,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final weight = (profile['weight'] ?? 0.0).toDouble();
 
         final permissions = profileData['permissions'] ?? {};
-        final hcConnectedApi = permissions['health_connect_connected'] as bool? ?? false;
-        
+        final hcConnectedApi =
+            permissions['health_connect_connected'] as bool? ?? false;
+
         final notifications = permissions['notifications'] ?? {};
         final aiTips = notifications['ai_tips'] as bool? ?? true;
         final rewards = notifications['rewards'] as bool? ?? false;
         final dailyReminder = notifications['daily_reminder'] as bool? ?? true;
         final sleepReminder = notifications['sleep_reminder'] as bool? ?? true;
-        final activityReminder = notifications['activity_reminder'] as bool? ?? true;
-        final challengeUpdates = notifications['challenge_updates'] as bool? ?? false;
-        final hydrationReminder = notifications['hydration_reminder'] as bool? ?? true;
+        final activityReminder =
+            notifications['activity_reminder'] as bool? ?? true;
+        final challengeUpdates =
+            notifications['challenge_updates'] as bool? ?? false;
+        final hydrationReminder =
+            notifications['hydration_reminder'] as bool? ?? true;
 
         if (hcConnectedApi != _hcConnected) {
           _hcConnected = hcConnectedApi;
           await prefs.setBool('healthSetupCompleted', hcConnectedApi);
         }
 
+        if (!mounted) return;
         setState(() {
           _name = name;
           _email = email;
@@ -98,7 +107,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _isLoading = false;
         });
 
-        // Also save profile data locally to cache
         await prefs.setString('user_name', name);
         await prefs.setString('onboarding_data', jsonEncode(profileData));
         return;
@@ -114,6 +122,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final permissions = data['permissions'] ?? {};
         final notifications = permissions['notifications'] ?? {};
 
+        if (!mounted) return;
         setState(() {
           _name = auth['name'] ?? data['name'] ?? "User";
           _email = auth['email'] ?? data['email'] ?? "";
@@ -123,16 +132,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _weight = (profile['weight'] ?? 0.0).toDouble();
           _notifAiTips = notifications['ai_tips'] as bool? ?? true;
           _notifRewards = notifications['rewards'] as bool? ?? false;
-          _notifDailyReminder = notifications['daily_reminder'] as bool? ?? true;
-          _notifSleepReminder = notifications['sleep_reminder'] as bool? ?? true;
-          _notifActivityReminder = notifications['activity_reminder'] as bool? ?? true;
-          _notifChallengeUpdates = notifications['challenge_updates'] as bool? ?? false;
-          _notifHydrationReminder = notifications['hydration_reminder'] as bool? ?? true;
+          _notifDailyReminder =
+              notifications['daily_reminder'] as bool? ?? true;
+          _notifSleepReminder =
+              notifications['sleep_reminder'] as bool? ?? true;
+          _notifActivityReminder =
+              notifications['activity_reminder'] as bool? ?? true;
+          _notifChallengeUpdates =
+              notifications['challenge_updates'] as bool? ?? false;
+          _notifHydrationReminder =
+              notifications['hydration_reminder'] as bool? ?? true;
           _isLoading = false;
         });
       } else {
-        // Fallback to currently logged in Firebase user details
         final currentUser = AuthService.instance.currentUser;
+        if (!mounted) return;
         if (currentUser != null) {
           setState(() {
             _name = currentUser.displayName ?? "User";
@@ -140,16 +154,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _isLoading = false;
           });
         } else {
-          setState(() {
-            _isLoading = false;
-          });
+          setState(() => _isLoading = false);
         }
       }
     } catch (e) {
       debugPrint("Error loading profile: $e");
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -162,7 +172,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _getBMICategory(double bmi) {
     if (bmi <= 0) return "Unknown";
     if (bmi < 18.5) return "Underweight";
-    if (bmi < 25.0) return "Normal Weight";
+    if (bmi < 25.0) return "Normal";
     if (bmi < 30.0) return "Overweight";
     return "Obese";
   }
@@ -170,159 +180,126 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Color _getBMICategoryColor(double bmi) {
     if (bmi <= 0) return Colors.grey;
     if (bmi < 18.5) return Colors.orange;
-    if (bmi < 25.0) return Colors.green;
+    if (bmi < 25.0) return _mint;
     if (bmi < 30.0) return Colors.orange;
     return Colors.redAccent;
   }
 
-  Future<void> _showEditProfileDialog() async {
-    final nameController = TextEditingController(text: _name);
-    final heightController = TextEditingController(text: _height > 0 ? _height.toString() : "");
-    final weightController = TextEditingController(text: _weight > 0 ? _weight.toString() : "");
-    
-    String selectedGender = (_gender == "Not set" || _gender.isEmpty) ? "Male" : _gender;
-    DateTime selectedDob = (_dob == "Not set" || _dob.isEmpty) ? DateTime(1995, 1, 1) : (DateTime.tryParse(_dob) ?? DateTime(1995, 1, 1));
-    
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  String _formatDobDisplay(String dob) {
+    if (dob == "Not set" || dob.isEmpty) return "Not set";
+    final d = DateTime.tryParse(dob);
+    if (d == null) return dob;
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[d.month - 1]} ${d.day}, ${d.year}';
+  }
 
-    final result = await showDialog<bool>(
+  int? _ageFromDob(String dob) {
+    final d = DateTime.tryParse(dob);
+    if (d == null) return null;
+    final now = DateTime.now();
+    var age = now.year - d.year;
+    if (now.month < d.month || (now.month == d.month && now.day < d.day)) {
+      age--;
+    }
+    return age;
+  }
+
+  String _themeModeLabel() {
+    switch (themeNotifier.value) {
+      case ThemeMode.light:
+        return 'Light';
+      case ThemeMode.dark:
+        return 'Dark';
+      case ThemeMode.system:
+        return 'System';
+    }
+  }
+
+  Future<void> _showEditProfileDialog() async {
+    final selectedGender = (_gender == "Not set" || _gender.isEmpty)
+        ? "Male"
+        : _gender;
+    final selectedDob = (_dob == "Not set" || _dob.isEmpty)
+        ? DateTime(1995, 1, 1)
+        : (DateTime.tryParse(_dob) ?? DateTime(1995, 1, 1));
+
+    // Controllers live inside the sheet widget so they are disposed only
+    // after the route is fully unmounted (avoids dispose-during-animation crash).
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: isDark ? const Color(0xFF1E1E26) : Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              title: const Text(
-                "Edit Profile",
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(labelText: "Full Name"),
-                    ),
-                    const SizedBox(height: 12),
-                    InkWell(
-                      onTap: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: selectedDob,
-                          firstDate: DateTime(1900),
-                          lastDate: DateTime.now(),
-                        );
-                        if (picked != null) {
-                          setDialogState(() {
-                            selectedDob = picked;
-                          });
-                        }
-                      },
-                      child: InputDecorator(
-                        decoration: const InputDecoration(labelText: "Date of Birth"),
-                        child: Text(
-                          "${selectedDob.year}-${selectedDob.month.toString().padLeft(2, '0')}-${selectedDob.day.toString().padLeft(2, '0')}",
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: selectedGender,
-                      decoration: const InputDecoration(labelText: "Gender"),
-                      items: ["Male", "Female", "Non-binary", "Other"]
-                          .map((g) => DropdownMenuItem(value: g, child: Text(g)))
-                          .toList(),
-                      onChanged: (val) {
-                        if (val != null) {
-                          setDialogState(() {
-                            selectedGender = val;
-                          });
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: heightController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: "Height (cm)"),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: weightController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: "Weight (kg)"),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text("Save", style: TextStyle(color: Colors.white)),
-                ),
-              ],
-            );
-          },
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withOpacity(0.45),
+      builder: (ctx) {
+        return _EditProfileSheet(
+          initialName: _name,
+          initialHeight: _height,
+          initialWeight: _weight,
+          initialGender: selectedGender,
+          initialDob: selectedDob,
         );
       },
     );
 
-    if (result == true) {
-      setState(() {
-        _isLoading = true;
-      });
-      try {
-        final dobStr = "${selectedDob.year}-${selectedDob.month.toString().padLeft(2, '0')}-${selectedDob.day.toString().padLeft(2, '0')}";
-            
-        final payload = {
-          "name": nameController.text.trim(),
-          "profile": {
-            "dob": dobStr,
-            "gender": selectedGender,
-            "height": double.tryParse(heightController.text) ?? 0.0,
-            "weight": double.tryParse(weightController.text) ?? 0.0,
-          }
-        };
+    if (result == null) return; // cancelled / dismissed
 
-        final updatedProfile = await ApiService.instance.updateUserProfile(payload);
-        
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('user_name', nameController.text.trim());
-        await prefs.setString('onboarding_data', jsonEncode(updatedProfile));
+    setState(() => _isLoading = true);
+    try {
+      final payload = {
+        "name": result['name'] as String,
+        "profile": {
+          "dob": result['dob'] as String,
+          "gender": result['gender'] as String,
+          "height": result['height'] as double,
+          "weight": result['weight'] as double,
+        },
+      };
 
-        await _loadProfileData();
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("🎉 Profile updated successfully!"),
-              backgroundColor: Colors.green,
+      final updatedProfile =
+          await ApiService.instance.updateUserProfile(payload);
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_name', result['name'] as String);
+      await prefs.setString('onboarding_data', jsonEncode(updatedProfile));
+
+      await _loadProfileData();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text("Profile updated successfully"),
+            backgroundColor: _mint,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
             ),
-          );
-        }
-      } catch (e) {
-        debugPrint("Error updating profile: $e");
-        setState(() {
-          _isLoading = false;
-        });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text("Failed to update profile: $e"),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
-        }
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error updating profile: $e");
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Failed to update profile: $e"),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     }
   }
@@ -330,39 +307,98 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _showThemeSelectionDialog() async {
     final prefs = await SharedPreferences.getInstance();
     final currentTheme = prefs.getString('theme_mode') ?? 'system';
-    
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
 
-    final selected = await showDialog<String>(
+    final selected = await showModalBottomSheet<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E26) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Choose Theme", style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            RadioListTile<String>(
-              title: const Text("Light"),
-              value: 'light',
-              groupValue: currentTheme,
-              onChanged: (val) => Navigator.pop(context, val),
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withOpacity(0.45),
+      builder: (ctx) {
+        return ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: Container(
+              decoration: BoxDecoration(
+                color: isDark
+                    ? const Color(0xFF16161C).withOpacity(0.94)
+                    : Colors.white.withOpacity(0.96),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(28),
+                ),
+                border: Border.all(
+                  color: isDark
+                      ? Colors.white.withOpacity(0.10)
+                      : Colors.white.withOpacity(0.7),
+                ),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white24 : Colors.black12,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Appearance',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.4,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Choose how Medifit looks on this device',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white54 : Colors.black45,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _themeOption(
+                    isDark: isDark,
+                    icon: Icons.light_mode_rounded,
+                    title: 'Light',
+                    subtitle: 'Bright, airy interface',
+                    selected: currentTheme == 'light',
+                    onTap: () => Navigator.pop(ctx, 'light'),
+                  ),
+                  const SizedBox(height: 10),
+                  _themeOption(
+                    isDark: isDark,
+                    icon: Icons.dark_mode_rounded,
+                    title: 'Dark',
+                    subtitle: 'Easy on the eyes at night',
+                    selected: currentTheme == 'dark',
+                    onTap: () => Navigator.pop(ctx, 'dark'),
+                  ),
+                  const SizedBox(height: 10),
+                  _themeOption(
+                    isDark: isDark,
+                    icon: Icons.settings_suggest_rounded,
+                    title: 'System',
+                    subtitle: 'Match device setting',
+                    selected: currentTheme == 'system',
+                    onTap: () => Navigator.pop(ctx, 'system'),
+                  ),
+                ],
+              ),
             ),
-            RadioListTile<String>(
-              title: const Text("Dark"),
-              value: 'dark',
-              groupValue: currentTheme,
-              onChanged: (val) => Navigator.pop(context, val),
-            ),
-            RadioListTile<String>(
-              title: const Text("System Default"),
-              value: 'system',
-              groupValue: currentTheme,
-              onChanged: (val) => Navigator.pop(context, val),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
 
     if (selected != null) {
@@ -381,7 +417,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _toggleHealthConnect(bool enable) async {
     final prefs = await SharedPreferences.getInstance();
-    
+
     if (enable) {
       if (Platform.isAndroid) {
         final status = await HealthService.instance.getAndroidSdkStatus();
@@ -392,24 +428,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
             builder: (context) {
               final isDark = Theme.of(context).brightness == Brightness.dark;
               return AlertDialog(
-                backgroundColor: isDark ? const Color(0xFF1E1E26) : Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                title: const Text("Install Health Connect", style: TextStyle(fontWeight: FontWeight.bold)),
+                backgroundColor: isDark
+                    ? const Color(0xFF1E1E26)
+                    : Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                title: const Text(
+                  "Install Health Connect",
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
                 content: const Text(
                   "Health Connect is not installed on this device. Would you like to download it from the Google Play Store to sync your fitness data?",
                 ),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(context, false),
-                    child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+                    child: const Text(
+                      "Cancel",
+                      style: TextStyle(color: Colors.grey),
+                    ),
                   ),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.teal,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      backgroundColor: _mint,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     onPressed: () => Navigator.pop(context, true),
-                    child: const Text("Download", style: TextStyle(color: Colors.white)),
+                    child: const Text("Download"),
                   ),
                 ],
               );
@@ -423,18 +472,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
       }
 
-      final permissionGranted = await HealthService.instance.requestPermissions();
+      final permissionGranted = await HealthService.instance
+          .requestPermissions();
       if (permissionGranted) {
         await prefs.setBool('healthSetupCompleted', true);
-        setState(() {
-          _hcConnected = true;
-        });
-        
+        setState(() => _hcConnected = true);
+
         try {
           await ApiService.instance.updateUserProfile({
-            "permissions": {
-              "health_connect_connected": true
-            }
+            "permissions": {"health_connect_connected": true},
           });
         } catch (e) {
           debugPrint("Failed to sync Health Connect status with server: $e");
@@ -442,9 +488,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("🎉 Connected to Health Connect successfully!"),
-              backgroundColor: Colors.green,
+            SnackBar(
+              content: const Text("Connected to Health Connect successfully"),
+              backgroundColor: _mint,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
             ),
           );
         }
@@ -452,23 +502,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("Permissions denied. Cannot connect to Health Connect."),
+              content: Text(
+                "Permissions denied. Cannot connect to Health Connect.",
+              ),
               backgroundColor: Colors.redAccent,
+              behavior: SnackBarBehavior.floating,
             ),
           );
         }
       }
     } else {
       await prefs.setBool('healthSetupCompleted', false);
-      setState(() {
-        _hcConnected = false;
-      });
+      setState(() => _hcConnected = false);
 
       try {
         await ApiService.instance.updateUserProfile({
-          "permissions": {
-            "health_connect_connected": false
-          }
+          "permissions": {"health_connect_connected": false},
         });
       } catch (e) {
         debugPrint("Failed to sync Health Connect status with server: $e");
@@ -478,6 +527,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Health Connect integration disabled."),
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -485,30 +535,90 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _handleSignOut() async {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E26) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Sign Out", style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text("Are you sure you want to sign out from Arcare?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      barrierColor: Colors.black.withOpacity(0.45),
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+            child: Container(
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? const Color(0xFF16161C).withOpacity(0.92)
+                    : Colors.white.withOpacity(0.96),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: isDark
+                      ? Colors.white.withOpacity(0.1)
+                      : Colors.black.withOpacity(0.05),
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.redAccent.withOpacity(0.12),
+                    ),
+                    child: const Icon(
+                      Icons.logout_rounded,
+                      color: Colors.redAccent,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Sign out?',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'You can sign back in anytime with the same account.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.black54,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _morphButton(
+                          label: 'Cancel',
+                          isDark: isDark,
+                          onTap: () => Navigator.pop(context, false),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _morphButton(
+                          label: 'Sign Out',
+                          isDark: isDark,
+                          filled: true,
+                          fillColor: Colors.redAccent,
+                          onTap: () => Navigator.pop(context, true),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("Sign Out", style: TextStyle(color: Colors.white)),
           ),
-        ],
+        ),
       ),
     );
 
@@ -528,12 +638,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : Colors.black87;
-    final secondaryTextColor = isDark ? Colors.grey[400] : Colors.grey[600];
+    final secondary = isDark ? Colors.white60 : Colors.black54;
 
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(color: Colors.blueAccent),
+      return Scaffold(
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: Container(
+                color: isDark
+                    ? const Color(0xFF0F0F12)
+                    : const Color(0xFFF6F8FC),
+              ),
+            ),
+            const Center(child: CircularProgressIndicator(color: _accent)),
+          ],
         ),
       );
     }
@@ -541,19 +660,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final bmi = _calculateBMI();
     final bmiCategory = _getBMICategory(bmi);
     final bmiColor = _getBMICategoryColor(bmi);
+    final age = _ageFromDob(_dob);
 
     return Scaffold(
       body: Stack(
         children: [
-          // Background Glows
+          // Morph background
           Positioned.fill(
             child: Container(
               color: isDark ? const Color(0xFF0F0F12) : const Color(0xFFF6F8FC),
             ),
           ),
           Positioned(
-            top: -100,
-            right: -100,
+            top: -120,
+            right: -80,
             width: 300,
             height: 300,
             child: Container(
@@ -561,8 +681,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
                   colors: [
-                    Colors.blue.withOpacity(isDark ? 0.12 : 0.08),
-                    Colors.blue.withOpacity(0.0),
+                    _accent.withOpacity(isDark ? 0.22 : 0.14),
+                    _accent.withOpacity(0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 220,
+            left: -100,
+            width: 280,
+            height: 280,
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    _violet.withOpacity(isDark ? 0.18 : 0.10),
+                    _violet.withOpacity(0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 40,
+            right: -60,
+            width: 240,
+            height: 240,
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    _sky.withOpacity(isDark ? 0.14 : 0.08),
+                    _sky.withOpacity(0),
                   ],
                 ),
               ),
@@ -570,249 +724,277 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
 
           SafeArea(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Title Area
-                  Text(
-                    "Profile Settings ⚙️",
-                    style: theme.textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      color: textColor,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Profile Header glass card
-                  GlassCard(
-                    padding: const EdgeInsets.all(20),
-                    child: Row(
+            child: RefreshIndicator(
+              color: _accent,
+              onRefresh: _loadProfileData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
+                ),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 110),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header
+                    Row(
                       children: [
-                        // Avatar placeholder
-                        Container(
-                          width: 64,
-                          height: 64,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: const LinearGradient(
-                              colors: [Colors.blueAccent, Colors.tealAccent],
-                            ),
-                            border: Border.all(
-                              color: Colors.white24,
-                              width: 1.5,
-                            ),
-                          ),
-                          child: Center(
-                            child: Text(
-                              _name.isNotEmpty ? _name[0].toUpperCase() : "U",
-                              style: const TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                _name,
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
+                                'Profile',
+                                style: theme.textTheme.headlineMedium?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -0.6,
+                                  color: textColor,
                                 ),
                               ),
-                              const SizedBox(height: 4),
                               Text(
-                                _email,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: secondaryTextColor,
+                                'Your health identity & preferences',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: secondary,
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.edit_rounded, color: Colors.blueAccent, size: 24),
-                          onPressed: _showEditProfileDialog,
-                          tooltip: "Edit Profile",
+                        _morphIconButton(
+                          icon: Icons.refresh_rounded,
+                          isDark: isDark,
+                          onTap: _loadProfileData,
                         ),
                       ],
                     ),
-                  ),
+                    const SizedBox(height: 20),
 
-                  const SizedBox(height: 16),
+                    // Hero identity card
+                    _buildIdentityHero(isDark, textColor, secondary, age),
+                    const SizedBox(height: 16),
 
-                  // Physical Parameters Grid
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildParameterCard("Weight", _weight > 0 ? "${_weight.round()} kg" : "Not set", Colors.orange, isDark),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _buildParameterCard("Height", _height > 0 ? "${_height.round()} cm" : "Not set", Colors.blue, isDark),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // BMI Card
-                  if (bmi > 0)
-                    GlassCard(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: bmiColor.withOpacity(0.12),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(Icons.speed, color: bmiColor, size: 24),
+                    // Metrics row
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _statTile(
+                            isDark: isDark,
+                            textColor: textColor,
+                            secondary: secondary,
+                            icon: Icons.monitor_weight_outlined,
+                            color: const Color(0xFFFFB03A),
+                            label: 'WEIGHT',
+                            value: _weight > 0
+                                ? '${_weight % 1 == 0 ? _weight.round() : _weight.toStringAsFixed(1)}'
+                                : '—',
+                            unit: _weight > 0 ? 'kg' : '',
                           ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  "Body Mass Index (BMI)",
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.grey,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _statTile(
+                            isDark: isDark,
+                            textColor: textColor,
+                            secondary: secondary,
+                            icon: Icons.height_rounded,
+                            color: _sky,
+                            label: 'HEIGHT',
+                            value: _height > 0
+                                ? '${_height % 1 == 0 ? _height.round() : _height.toStringAsFixed(1)}'
+                                : '—',
+                            unit: _height > 0 ? 'cm' : '',
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _statTile(
+                            isDark: isDark,
+                            textColor: textColor,
+                            secondary: secondary,
+                            icon: Icons.speed_rounded,
+                            color: bmiColor,
+                            label: 'BMI',
+                            value: bmi > 0 ? bmi.toStringAsFixed(1) : '—',
+                            unit: bmi > 0 ? bmiCategory : '',
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+
+                    // Personal details
+                    _sectionLabel('PERSONAL DETAILS', theme),
+                    const SizedBox(height: 10),
+                    GlassCard(
+                      margin: EdgeInsets.zero,
+                      padding: EdgeInsets.zero,
+                      borderRadius: 20,
+                      child: Column(
+                        children: [
+                          _infoRow(
+                            isDark: isDark,
+                            textColor: textColor,
+                            secondary: secondary,
+                            icon: Icons.cake_outlined,
+                            color: _accent,
+                            title: 'Date of birth',
+                            value: _formatDobDisplay(_dob),
+                          ),
+                          _divider(isDark),
+                          _infoRow(
+                            isDark: isDark,
+                            textColor: textColor,
+                            secondary: secondary,
+                            icon: Icons.wc_rounded,
+                            color: _violet,
+                            title: 'Gender',
+                            value: _gender,
+                          ),
+                          _divider(isDark),
+                          _infoRow(
+                            isDark: isDark,
+                            textColor: textColor,
+                            secondary: secondary,
+                            icon: Icons.mail_outline_rounded,
+                            color: _sky,
+                            title: 'Email',
+                            value: _email.isEmpty ? 'Not set' : _email,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+
+                    // Health
+                    _sectionLabel('HEALTH', theme),
+                    const SizedBox(height: 10),
+                    GlassCard(
+                      margin: EdgeInsets.zero,
+                      padding: EdgeInsets.zero,
+                      borderRadius: 20,
+                      child: Column(
+                        children: [
+                          _settingTile(
+                            isDark: isDark,
+                            textColor: textColor,
+                            secondary: secondary,
+                            icon: Icons.track_changes_rounded,
+                            color: _accent,
+                            title: 'Health goals',
+                            subtitle: 'Steps, water, sleep & calorie targets',
+                            trailing: Icon(
+                              Icons.chevron_right_rounded,
+                              color: secondary,
+                              size: 22,
+                            ),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      const GoalsConfigurationScreen(),
                                 ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  "${bmi.toStringAsFixed(1)} - $bmiCategory",
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: textColor,
-                                  ),
-                                ),
-                              ],
+                              ).then((_) => _loadProfileData());
+                            },
+                          ),
+                          _divider(isDark),
+                          _settingTile(
+                            isDark: isDark,
+                            textColor: textColor,
+                            secondary: secondary,
+                            icon: Icons.health_and_safety_outlined,
+                            color: _mint,
+                            title: 'Health Connect',
+                            subtitle: _hcConnected
+                                ? 'Connected · auto-syncing data'
+                                : 'Not connected · tap switch to set up',
+                            trailing: Switch.adaptive(
+                              value: _hcConnected,
+                              onChanged: _toggleHealthConnect,
+                              activeColor: _mint,
                             ),
                           ),
                         ],
                       ),
                     ),
+                    const SizedBox(height: 22),
 
-                  const SizedBox(height: 24),
-
-                  // General Settings Header
-                  Text(
-                    "Settings Preferences",
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w900,
-                      color: textColor,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-
-                  // Settings options
-                  GlassCard(
-                    padding: EdgeInsets.zero,
-                    child: Column(
-                      children: [
-                        _buildSettingRow(
-                          icon: Icons.track_changes_rounded,
-                          title: "Configure Health Goals",
-                          subtitle: "Customize daily steps, water, sleep, calorie targets",
-                          trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const GoalsConfigurationScreen(),
-                              ),
-                            ).then((_) {
-                              _loadProfileData();
-                            });
-                          },
-                        ),
-                        const Divider(height: 1, color: Colors.white10),
-                        _buildSettingRow(
-                          icon: Icons.health_and_safety_outlined,
-                          title: "Health Connect Integration",
-                          subtitle: _hcConnected ? "Connected successfully" : "Setup missing",
-                          trailing: Switch(
-                            value: _hcConnected,
-                            onChanged: _toggleHealthConnect,
-                            activeColor: Colors.tealAccent,
+                    // Preferences
+                    _sectionLabel('PREFERENCES', theme),
+                    const SizedBox(height: 10),
+                    GlassCard(
+                      margin: EdgeInsets.zero,
+                      padding: EdgeInsets.zero,
+                      borderRadius: 20,
+                      child: Column(
+                        children: [
+                          _settingTile(
+                            isDark: isDark,
+                            textColor: textColor,
+                            secondary: secondary,
+                            icon: Icons.notifications_none_rounded,
+                            color: const Color(0xFFFFB03A),
+                            title: 'Notifications',
+                            subtitle: _notificationSummary(),
+                            trailing: Icon(
+                              Icons.chevron_right_rounded,
+                              color: secondary,
+                              size: 22,
+                            ),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      const NotificationSettingsScreen(),
+                                ),
+                              ).then((_) => _loadProfileData());
+                            },
                           ),
-                        ),
-                        const Divider(height: 1, color: Colors.white10),
-                        _buildSettingRow(
-                          icon: Icons.notifications_none_outlined,
-                          title: "Daily Reminders & Hydration",
-                          subtitle: "Manage notification alerts",
-                          trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const NotificationSettingsScreen(),
-                              ),
-                            ).then((_) {
-                              _loadProfileData();
-                            });
-                          },
-                        ),
-                        const Divider(height: 1, color: Colors.white10),
-                        _buildSettingRow(
-                          icon: Icons.color_lens_outlined,
-                          title: "Appearance Theme",
-                          subtitle: "Switch light, dark or system theme",
-                          trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
-                          onTap: _showThemeSelectionDialog,
-                        ),
-                        const Divider(height: 1, color: Colors.white10),
-                        _buildSettingRow(
-                          icon: Icons.privacy_tip_outlined,
-                          title: "Privacy & Consent Settings",
-                          subtitle: "All permissions active",
-                          trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // Sign Out Button
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isDark ? Colors.redAccent.withOpacity(0.12) : Colors.red[50],
-                      foregroundColor: Colors.redAccent,
-                      side: const BorderSide(color: Colors.redAccent, width: 1.2),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
+                          _divider(isDark),
+                          _settingTile(
+                            isDark: isDark,
+                            textColor: textColor,
+                            secondary: secondary,
+                            icon: Icons.palette_outlined,
+                            color: _violet,
+                            title: 'Appearance',
+                            subtitle: 'Theme · ${_themeModeLabel()}',
+                            trailing: Icon(
+                              Icons.chevron_right_rounded,
+                              color: secondary,
+                              size: 22,
+                            ),
+                            onTap: _showThemeSelectionDialog,
+                          ),
+                        ],
                       ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      elevation: 0,
                     ),
-                    onPressed: _handleSignOut,
-                    icon: const Icon(Icons.logout_rounded, size: 18),
-                    label: const Text(
-                      "Sign Out from Arcare",
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
-                  ),
+                    const SizedBox(height: 28),
 
-                  const SizedBox(height: 80), // Padding to clear bottom navigation bar
-                ],
+                    // Sign out
+                    _morphButton(
+                      label: 'Sign out',
+                      isDark: isDark,
+                      filled: false,
+                      outlineColor: Colors.redAccent,
+                      textColorOverride: Colors.redAccent,
+                      icon: Icons.logout_rounded,
+                      onTap: _handleSignOut,
+                    ),
+                    const SizedBox(height: 12),
+                    Center(
+                      child: Text(
+                        'Medifit Wellness · #Wellness360',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: secondary.withOpacity(0.7),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -821,28 +1003,317 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildParameterCard(String title, String value, Color color, bool isDark) {
-    final textColor = isDark ? Colors.white : Colors.black87;
+  String _notificationSummary() {
+    final enabled = [
+      if (_notifDailyReminder) 'daily',
+      if (_notifHydrationReminder) 'hydration',
+      if (_notifSleepReminder) 'sleep',
+      if (_notifActivityReminder) 'activity',
+      if (_notifAiTips) 'AI tips',
+      if (_notifChallengeUpdates) 'challenges',
+      if (_notifRewards) 'rewards',
+    ];
+    if (enabled.isEmpty) return 'All alerts off';
+    if (enabled.length <= 2) return enabled.join(' · ');
+    return '${enabled.length} alerts on';
+  }
+
+  Widget _buildIdentityHero(
+    bool isDark,
+    Color textColor,
+    Color? secondary,
+    int? age,
+  ) {
+    final initial = _name.isNotEmpty ? _name[0].toUpperCase() : 'U';
+
     return GlassCard(
-      padding: const EdgeInsets.all(16),
+      margin: EdgeInsets.zero,
+      padding: EdgeInsets.zero,
+      borderRadius: 26,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(26),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              _accent.withOpacity(isDark ? 0.18 : 0.12),
+              _violet.withOpacity(isDark ? 0.10 : 0.06),
+              Colors.transparent,
+            ],
+          ),
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                // Avatar with morph ring
+                Container(
+                  width: 76,
+                  height: 76,
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [_accent, _violet, _sky],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _accent.withOpacity(0.35),
+                        blurRadius: 16,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isDark ? const Color(0xFF16161C) : Colors.white,
+                    ),
+                    child: Center(
+                      child: Text(
+                        initial,
+                        style: TextStyle(
+                          fontSize: 30,
+                          fontWeight: FontWeight.w900,
+                          color: _accent,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.4,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _email.isEmpty ? 'No email on file' : _email,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: secondary,
+                        ),
+                      ),
+                      if (age != null) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(20),
+                            color: _mint.withOpacity(0.14),
+                          ),
+                          child: Text(
+                            '$age yrs · $_gender',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: _mint,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: _showEditProfileDialog,
+                borderRadius: BorderRadius.circular(14),
+                child: Ink(
+                  height: 44,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    gradient: const LinearGradient(
+                      colors: [_accent, Color(0xFFFF8A70)],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _accent.withOpacity(0.3),
+                        blurRadius: 12,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.edit_rounded, color: Colors.white, size: 18),
+                      SizedBox(width: 8),
+                      Text(
+                        'Edit profile',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statTile({
+    required bool isDark,
+    required Color textColor,
+    required Color? secondary,
+    required IconData icon,
+    required Color color,
+    required String label,
+    required String value,
+    required String unit,
+  }) {
+    return GlassCard(
+      margin: EdgeInsets.zero,
+      padding: const EdgeInsets.fromLTRB(12, 14, 12, 14),
+      borderRadius: 18,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: color.withOpacity(0.14),
+            ),
+            child: Icon(icon, size: 18, color: color),
+          ),
+          const SizedBox(height: 12),
           Text(
-            title,
-            style: const TextStyle(
-              fontSize: 11,
-              color: Colors.grey,
-              fontWeight: FontWeight.bold,
+            label,
+            style: TextStyle(
+              fontSize: 9.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.7,
+              color: secondary,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 2),
           Text(
             value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.4,
               color: textColor,
+            ),
+          ),
+          if (unit.isNotEmpty)
+            Text(
+              unit,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionLabel(String title, ThemeData theme) {
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0.85,
+        color: theme.colorScheme.primary,
+      ),
+    );
+  }
+
+  Widget _divider(bool isDark) {
+    return Divider(
+      height: 1,
+      thickness: 1,
+      color: isDark
+          ? Colors.white.withOpacity(0.06)
+          : Colors.black.withOpacity(0.05),
+    );
+  }
+
+  Widget _infoRow({
+    required bool isDark,
+    required Color textColor,
+    required Color? secondary,
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String value,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(13),
+              color: color.withOpacity(0.12),
+            ),
+            child: Icon(icon, size: 20, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: secondary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: textColor,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -850,57 +1321,716 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildSettingRow({
+  Widget _settingTile({
+    required bool isDark,
+    required Color textColor,
+    required Color? secondary,
     required IconData icon,
+    required Color color,
     required String title,
     required String subtitle,
     required Widget trailing,
     VoidCallback? onTap,
   }) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : Colors.black87;
-    final secondaryTextColor = isDark ? Colors.grey[400] : Colors.grey[600];
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  color: color.withOpacity(0.12),
+                  border: Border.all(color: color.withOpacity(0.18)),
+                ),
+                child: Icon(icon, size: 20, color: color),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                        letterSpacing: -0.15,
+                        color: textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                        color: secondary,
+                        height: 1.25,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              trailing,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
+  Widget _morphIconButton({
+    required IconData icon,
+    required bool isDark,
+    VoidCallback? onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: isDark
+                ? Colors.white.withOpacity(0.06)
+                : Colors.black.withOpacity(0.04),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withOpacity(0.08)
+                  : Colors.black.withOpacity(0.05),
+            ),
+          ),
+          child: Icon(
+            icon,
+            size: 20,
+            color: isDark ? Colors.white70 : Colors.black54,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _morphButton({
+    required String label,
+    required bool isDark,
+    required VoidCallback onTap,
+    bool filled = false,
+    Color? fillColor,
+    Color? outlineColor,
+    Color? textColorOverride,
+    IconData? icon,
+  }) {
+    final color = fillColor ?? _accent;
+    final borderColor =
+        outlineColor ??
+        (isDark
+            ? Colors.white.withOpacity(0.10)
+            : Colors.black.withOpacity(0.06));
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          height: 50,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: filled
+                ? LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [color.withOpacity(0.95), color],
+                  )
+                : null,
+            color: filled
+                ? null
+                : (isDark
+                      ? Colors.white.withOpacity(0.05)
+                      : Colors.black.withOpacity(0.03)),
+            border: Border.all(
+              color: filled ? color.withOpacity(0.3) : borderColor,
+            ),
+            boxShadow: filled
+                ? [
+                    BoxShadow(
+                      color: color.withOpacity(0.28),
+                      blurRadius: 14,
+                      offset: const Offset(0, 6),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (icon != null) ...[
+                Icon(
+                  icon,
+                  size: 18,
+                  color:
+                      textColorOverride ??
+                      (filled
+                          ? Colors.white
+                          : (isDark ? Colors.white70 : Colors.black87)),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                  color:
+                      textColorOverride ??
+                      (filled
+                          ? Colors.white
+                          : (isDark ? Colors.white70 : Colors.black87)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _themeOption({
+    required bool isDark,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final textColor = isDark ? Colors.white : Colors.black87;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            color: selected
+                ? _accent.withOpacity(isDark ? 0.16 : 0.10)
+                : (isDark
+                      ? Colors.white.withOpacity(0.04)
+                      : Colors.black.withOpacity(0.03)),
+            border: Border.all(
+              color: selected
+                  ? _accent.withOpacity(0.5)
+                  : (isDark
+                        ? Colors.white.withOpacity(0.08)
+                        : Colors.black.withOpacity(0.05)),
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  color: selected
+                      ? _accent.withOpacity(0.18)
+                      : (isDark
+                            ? Colors.white.withOpacity(0.06)
+                            : Colors.black.withOpacity(0.04)),
+                ),
+                child: Icon(
+                  icon,
+                  color: selected
+                      ? _accent
+                      : (isDark ? Colors.white70 : Colors.black54),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: textColor,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white54 : Colors.black45,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                selected ? Icons.check_circle_rounded : Icons.circle_outlined,
+                color: selected
+                    ? _accent
+                    : (isDark ? Colors.white30 : Colors.black26),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _morphField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    required bool isDark,
+    TextInputType? keyboardType,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      style: TextStyle(
+        color: isDark ? Colors.white : Colors.black87,
+        fontWeight: FontWeight.w600,
+      ),
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, size: 20),
+        filled: true,
+        fillColor: isDark
+            ? Colors.white.withOpacity(0.05)
+            : Colors.black.withOpacity(0.03),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _accent, width: 1.4),
+        ),
+      ),
+    );
+  }
+
+  Widget _morphTapField({
+    required bool isDark,
+    required String label,
+    required String value,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.white.withOpacity(0.04) : Colors.black.withOpacity(0.03),
-                borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon, size: 20),
+          filled: true,
+          fillColor: isDark
+              ? Colors.white.withOpacity(0.05)
+              : Colors.black.withOpacity(0.03),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+        ),
+        child: Text(
+          value,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _morphDropdown({
+    required bool isDark,
+    required String label,
+    required String value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      value: value,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: const Icon(Icons.wc_rounded, size: 20),
+        filled: true,
+        fillColor: isDark
+            ? Colors.white.withOpacity(0.05)
+            : Colors.black.withOpacity(0.03),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _accent, width: 1.4),
+        ),
+      ),
+      items: items
+          .map((g) => DropdownMenuItem(value: g, child: Text(g)))
+          .toList(),
+      onChanged: onChanged,
+    );
+  }
+}
+
+/// Owns [TextEditingController]s for the edit-profile sheet so they are only
+/// disposed after the route is fully unmounted (safe on cancel / swipe-dismiss).
+class _EditProfileSheet extends StatefulWidget {
+  final String initialName;
+  final double initialHeight;
+  final double initialWeight;
+  final String initialGender;
+  final DateTime initialDob;
+
+  const _EditProfileSheet({
+    required this.initialName,
+    required this.initialHeight,
+    required this.initialWeight,
+    required this.initialGender,
+    required this.initialDob,
+  });
+
+  @override
+  State<_EditProfileSheet> createState() => _EditProfileSheetState();
+}
+
+class _EditProfileSheetState extends State<_EditProfileSheet> {
+  static const Color _accent = Color(0xFFFF6D55);
+
+  late final TextEditingController _nameController;
+  late final TextEditingController _heightController;
+  late final TextEditingController _weightController;
+  late String _selectedGender;
+  late DateTime _selectedDob;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName);
+    _heightController = TextEditingController(
+      text: widget.initialHeight > 0
+          ? widget.initialHeight.toStringAsFixed(
+              widget.initialHeight == widget.initialHeight.roundToDouble()
+                  ? 0
+                  : 1,
+            )
+          : '',
+    );
+    _weightController = TextEditingController(
+      text: widget.initialWeight > 0
+          ? widget.initialWeight.toStringAsFixed(
+              widget.initialWeight == widget.initialWeight.roundToDouble()
+                  ? 0
+                  : 1,
+            )
+          : '',
+    );
+    _selectedGender = widget.initialGender;
+    _selectedDob = widget.initialDob;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _heightController.dispose();
+    _weightController.dispose();
+    super.dispose();
+  }
+
+  void _onSave() {
+    Navigator.pop(context, <String, dynamic>{
+      'name': _nameController.text.trim(),
+      'dob':
+          '${_selectedDob.year}-${_selectedDob.month.toString().padLeft(2, '0')}-${_selectedDob.day.toString().padLeft(2, '0')}',
+      'gender': _selectedGender,
+      'height': double.tryParse(_heightController.text) ?? 0.0,
+      'weight': double.tryParse(_weightController.text) ?? 0.0,
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            decoration: BoxDecoration(
+              color: isDark
+                  ? const Color(0xFF16161C).withOpacity(0.94)
+                  : Colors.white.withOpacity(0.96),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(28)),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withOpacity(0.10)
+                    : Colors.white.withOpacity(0.7),
               ),
-              child: Icon(icon, color: isDark ? Colors.tealAccent : Colors.teal[800], size: 20),
             ),
-            const SizedBox(width: 14),
-            Expanded(
+            padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+            child: SingleChildScrollView(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white24 : Colors.black12,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
                   Text(
-                    title,
+                    'Edit Profile',
                     style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.4,
                       color: textColor,
                     ),
                   ),
+                  const SizedBox(height: 6),
                   Text(
-                    subtitle,
+                    'Update how you show up in Medifit',
                     style: TextStyle(
-                      fontSize: 11,
-                      color: secondaryTextColor,
+                      fontSize: 13,
+                      color: isDark ? Colors.white54 : Colors.black45,
                     ),
+                  ),
+                  const SizedBox(height: 18),
+                  _field(
+                    controller: _nameController,
+                    label: 'Full name',
+                    icon: Icons.person_outline_rounded,
+                    isDark: isDark,
+                  ),
+                  const SizedBox(height: 12),
+                  InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _selectedDob,
+                        firstDate: DateTime(1900),
+                        lastDate: DateTime.now(),
+                      );
+                      if (picked != null) {
+                        setState(() => _selectedDob = picked);
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(14),
+                    child: InputDecorator(
+                      decoration: _deco(
+                        isDark: isDark,
+                        label: 'Date of birth',
+                        icon: Icons.cake_outlined,
+                      ),
+                      child: Text(
+                        '${_selectedDob.year}-${_selectedDob.month.toString().padLeft(2, '0')}-${_selectedDob.day.toString().padLeft(2, '0')}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: textColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: _selectedGender,
+                    decoration: _deco(
+                      isDark: isDark,
+                      label: 'Gender',
+                      icon: Icons.wc_rounded,
+                    ),
+                    items: const [
+                      'Male',
+                      'Female',
+                      'Non-binary',
+                      'Other',
+                    ]
+                        .map((g) =>
+                            DropdownMenuItem(value: g, child: Text(g)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) setState(() => _selectedGender = val);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _field(
+                          controller: _heightController,
+                          label: 'Height (cm)',
+                          icon: Icons.height_rounded,
+                          isDark: isDark,
+                          keyboardType:
+                              const TextInputType.numberWithOptions(
+                                  decimal: true),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _field(
+                          controller: _weightController,
+                          label: 'Weight (kg)',
+                          icon: Icons.monitor_weight_outlined,
+                          isDark: isDark,
+                          keyboardType:
+                              const TextInputType.numberWithOptions(
+                                  decimal: true),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _button(
+                          label: 'Cancel',
+                          isDark: isDark,
+                          onTap: () => Navigator.pop(context),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _button(
+                          label: 'Save',
+                          isDark: isDark,
+                          filled: true,
+                          onTap: _onSave,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            trailing,
-          ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _deco({
+    required bool isDark,
+    required String label,
+    required IconData icon,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon, size: 20),
+      filled: true,
+      fillColor: isDark
+          ? Colors.white.withOpacity(0.05)
+          : Colors.black.withOpacity(0.03),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: _accent, width: 1.4),
+      ),
+    );
+  }
+
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    required bool isDark,
+    TextInputType? keyboardType,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      style: TextStyle(
+        color: isDark ? Colors.white : Colors.black87,
+        fontWeight: FontWeight.w600,
+      ),
+      decoration: _deco(isDark: isDark, label: label, icon: icon),
+    );
+  }
+
+  Widget _button({
+    required String label,
+    required bool isDark,
+    required VoidCallback onTap,
+    bool filled = false,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          height: 50,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: filled
+                ? const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFFFF8A70), _accent],
+                  )
+                : null,
+            color: filled
+                ? null
+                : (isDark
+                    ? Colors.white.withOpacity(0.05)
+                    : Colors.black.withOpacity(0.03)),
+            border: Border.all(
+              color: filled
+                  ? _accent.withOpacity(0.3)
+                  : (isDark
+                      ? Colors.white.withOpacity(0.10)
+                      : Colors.black.withOpacity(0.06)),
+            ),
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 14,
+                color: filled
+                    ? Colors.white
+                    : (isDark ? Colors.white70 : Colors.black87),
+              ),
+            ),
+          ),
         ),
       ),
     );

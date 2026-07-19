@@ -393,163 +393,24 @@ class _SosScreenState extends State<SosScreen>
   }
 
   Future<void> _showContactSheet({SosContact? contact}) async {
-    final nameCtrl = TextEditingController(text: contact?.name ?? '');
-    final phoneCtrl = TextEditingController(text: contact?.phone ?? '');
-    final formKey = GlobalKey<FormState>();
-    bool saving = false;
-
-    await showModalBottomSheet(
+    final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withOpacity(0.4),
       builder: (ctx) {
-        final isDark = Theme.of(ctx).brightness == Brightness.dark;
-        final textColor = isDark ? Colors.white : Colors.black87;
-
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom,
-              ),
-              child: ClipRRect(
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(28)),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? const Color(0xFF16161C).withOpacity(0.90)
-                          : Colors.white.withOpacity(0.92),
-                      borderRadius:
-                          const BorderRadius.vertical(top: Radius.circular(28)),
-                      border: Border.all(
-                        color: isDark
-                            ? Colors.white.withOpacity(0.10)
-                            : Colors.white.withOpacity(0.70),
-                      ),
-                    ),
-                    padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
-                    child: Form(
-                      key: formKey,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Center(
-                            child: Container(
-                              width: 40,
-                              height: 4,
-                              decoration: BoxDecoration(
-                                color: isDark
-                                    ? Colors.white24
-                                    : Colors.black12,
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 18),
-                          Text(
-                            contact == null
-                                ? 'Add Emergency Contact'
-                                : 'Edit Contact',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.4,
-                              color: textColor,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'People notified when you trigger SOS',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: isDark ? Colors.white54 : Colors.black45,
-                            ),
-                          ),
-                          const SizedBox(height: 18),
-                          TextFormField(
-                            controller: nameCtrl,
-                            textCapitalization: TextCapitalization.words,
-                            decoration: _morphInput('Name', isDark),
-                            validator: (v) => (v == null || v.trim().isEmpty)
-                                ? 'Required'
-                                : null,
-                          ),
-                          const SizedBox(height: 12),
-                          TextFormField(
-                            controller: phoneCtrl,
-                            keyboardType: TextInputType.phone,
-                            decoration: _morphInput('Phone number', isDark),
-                            validator: (v) => (v == null || v.trim().isEmpty)
-                                ? 'Required'
-                                : null,
-                          ),
-                          const SizedBox(height: 22),
-                          _MorphButton(
-                            label: contact == null
-                                ? 'Add Contact'
-                                : 'Save Changes',
-                            isDark: isDark,
-                            filled: true,
-                            fillColor: _sosRed,
-                            loading: saving,
-                            onTap: saving
-                                ? null
-                                : () async {
-                                    if (!formKey.currentState!.validate()) {
-                                      return;
-                                    }
-                                    if (_email == null) return;
-
-                                    setSheetState(() => saving = true);
-                                    try {
-                                      if (contact == null) {
-                                        await ApiService.instance
-                                            .createSosContact(_email!, {
-                                          'name': nameCtrl.text.trim(),
-                                          'phone': phoneCtrl.text.trim(),
-                                        });
-                                      } else {
-                                        await ApiService.instance
-                                            .updateSosContact(contact.id, {
-                                          'name': nameCtrl.text.trim(),
-                                          'phone': phoneCtrl.text.trim(),
-                                        });
-                                      }
-                                      if (ctx.mounted) Navigator.pop(ctx);
-                                      await _loadSosData();
-                                      _showSnack(contact == null
-                                          ? 'Contact added'
-                                          : 'Contact updated');
-                                    } catch (e) {
-                                      setSheetState(() => saving = false);
-                                      _showSnack(
-                                        e
-                                            .toString()
-                                            .replaceFirst('Exception: ', ''),
-                                        isError: true,
-                                      );
-                                    }
-                                  },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
+        return _SosContactSheet(
+          contact: contact,
+          email: _email,
+          inputDecoration: _morphInput,
         );
       },
     );
 
-    nameCtrl.dispose();
-    phoneCtrl.dispose();
+    if (saved == true) {
+      await _loadSosData();
+      _showSnack(contact == null ? 'Contact added' : 'Contact updated');
+    }
   }
 
   Future<void> _deleteContact(SosContact contact) async {
@@ -642,155 +503,26 @@ class _SosScreenState extends State<SosScreen>
   }
 
   Future<void> _showEmergencyNumbersSheet() async {
-    final policeCtrl = TextEditingController(text: _policeNumber);
-    final ambulanceCtrl = TextEditingController(text: _ambulanceNumber);
-    final fireCtrl = TextEditingController(text: _fireNumber);
-    final formKey = GlobalKey<FormState>();
-    bool saving = false;
-
-    await showModalBottomSheet(
+    final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withOpacity(0.4),
       builder: (ctx) {
-        final isDark = Theme.of(ctx).brightness == Brightness.dark;
-        final textColor = isDark ? Colors.white : Colors.black87;
-
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom,
-              ),
-              child: ClipRRect(
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(28)),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? const Color(0xFF16161C).withOpacity(0.90)
-                          : Colors.white.withOpacity(0.92),
-                      borderRadius:
-                          const BorderRadius.vertical(top: Radius.circular(28)),
-                      border: Border.all(
-                        color: isDark
-                            ? Colors.white.withOpacity(0.10)
-                            : Colors.white.withOpacity(0.70),
-                      ),
-                    ),
-                    padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
-                    child: Form(
-                      key: formKey,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Center(
-                            child: Container(
-                              width: 40,
-                              height: 4,
-                              decoration: BoxDecoration(
-                                color: isDark
-                                    ? Colors.white24
-                                    : Colors.black12,
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 18),
-                          Text(
-                            'Edit Emergency Numbers',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.4,
-                              color: textColor,
-                            ),
-                          ),
-                          const SizedBox(height: 18),
-                          TextFormField(
-                            controller: policeCtrl,
-                            keyboardType: TextInputType.phone,
-                            decoration: _morphInput('Police', isDark),
-                            validator: (v) => (v == null || v.trim().isEmpty)
-                                ? 'Required'
-                                : null,
-                          ),
-                          const SizedBox(height: 12),
-                          TextFormField(
-                            controller: ambulanceCtrl,
-                            keyboardType: TextInputType.phone,
-                            decoration: _morphInput('Ambulance', isDark),
-                            validator: (v) => (v == null || v.trim().isEmpty)
-                                ? 'Required'
-                                : null,
-                          ),
-                          const SizedBox(height: 12),
-                          TextFormField(
-                            controller: fireCtrl,
-                            keyboardType: TextInputType.phone,
-                            decoration: _morphInput('Fire', isDark),
-                            validator: (v) => (v == null || v.trim().isEmpty)
-                                ? 'Required'
-                                : null,
-                          ),
-                          const SizedBox(height: 22),
-                          _MorphButton(
-                            label: 'Save Numbers',
-                            isDark: isDark,
-                            filled: true,
-                            fillColor: _sosRed,
-                            loading: saving,
-                            onTap: saving
-                                ? null
-                                : () async {
-                                    if (!formKey.currentState!.validate()) {
-                                      return;
-                                    }
-                                    if (_email == null) return;
-
-                                    setSheetState(() => saving = true);
-                                    try {
-                                      await ApiService.instance
-                                          .updateEmergencyNumbers(_email!, {
-                                        'police_number':
-                                            policeCtrl.text.trim(),
-                                        'ambulance_number':
-                                            ambulanceCtrl.text.trim(),
-                                        'fire_number': fireCtrl.text.trim(),
-                                      });
-                                      if (ctx.mounted) Navigator.pop(ctx);
-                                      await _loadSosData();
-                                      _showSnack('Emergency numbers updated');
-                                    } catch (e) {
-                                      setSheetState(() => saving = false);
-                                      _showSnack(
-                                        e
-                                            .toString()
-                                            .replaceFirst('Exception: ', ''),
-                                        isError: true,
-                                      );
-                                    }
-                                  },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
+        return _SosEmergencyNumbersSheet(
+          email: _email,
+          policeNumber: _policeNumber,
+          ambulanceNumber: _ambulanceNumber,
+          fireNumber: _fireNumber,
+          inputDecoration: _morphInput,
         );
       },
     );
 
-    policeCtrl.dispose();
-    ambulanceCtrl.dispose();
-    fireCtrl.dispose();
+    if (saved == true) {
+      await _loadSosData();
+      _showSnack('Emergency numbers updated');
+    }
   }
 
   Future<void> _resetEmergencyNumbers() async {
@@ -1821,6 +1553,347 @@ class _ContactMorphCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Contact form sheet — owns controllers so they dispose after route unmount.
+class _SosContactSheet extends StatefulWidget {
+  final SosContact? contact;
+  final String? email;
+  final InputDecoration Function(String label, bool isDark) inputDecoration;
+
+  const _SosContactSheet({
+    required this.contact,
+    required this.email,
+    required this.inputDecoration,
+  });
+
+  @override
+  State<_SosContactSheet> createState() => _SosContactSheetState();
+}
+
+class _SosContactSheetState extends State<_SosContactSheet> {
+  static const Color _sosRed = Color(0xFFFF3B30);
+
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _phoneCtrl;
+  final _formKey = GlobalKey<FormState>();
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.contact?.name ?? '');
+    _phoneCtrl = TextEditingController(text: widget.contact?.phone ?? '');
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (widget.email == null) return;
+
+    setState(() => _saving = true);
+    try {
+      if (widget.contact == null) {
+        await ApiService.instance.createSosContact(widget.email!, {
+          'name': _nameCtrl.text.trim(),
+          'phone': _phoneCtrl.text.trim(),
+        });
+      } else {
+        await ApiService.instance.updateSosContact(widget.contact!.id, {
+          'name': _nameCtrl.text.trim(),
+          'phone': _phoneCtrl.text.trim(),
+        });
+      }
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: _sosRed,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: isDark
+                  ? const Color(0xFF16161C).withOpacity(0.90)
+                  : Colors.white.withOpacity(0.92),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(28)),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withOpacity(0.10)
+                    : Colors.white.withOpacity(0.70),
+              ),
+            ),
+            padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white24 : Colors.black12,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    widget.contact == null
+                        ? 'Add Emergency Contact'
+                        : 'Edit Contact',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.4,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'People notified when you trigger SOS',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white54 : Colors.black45,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  TextFormField(
+                    controller: _nameCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: widget.inputDecoration('Name', isDark),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration:
+                        widget.inputDecoration('Phone number', isDark),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 22),
+                  _MorphButton(
+                    label: widget.contact == null
+                        ? 'Add Contact'
+                        : 'Save Changes',
+                    isDark: isDark,
+                    filled: true,
+                    fillColor: _sosRed,
+                    loading: _saving,
+                    onTap: _saving ? null : _save,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Emergency numbers sheet — owns controllers safely across dismiss animation.
+class _SosEmergencyNumbersSheet extends StatefulWidget {
+  final String? email;
+  final String policeNumber;
+  final String ambulanceNumber;
+  final String fireNumber;
+  final InputDecoration Function(String label, bool isDark) inputDecoration;
+
+  const _SosEmergencyNumbersSheet({
+    required this.email,
+    required this.policeNumber,
+    required this.ambulanceNumber,
+    required this.fireNumber,
+    required this.inputDecoration,
+  });
+
+  @override
+  State<_SosEmergencyNumbersSheet> createState() =>
+      _SosEmergencyNumbersSheetState();
+}
+
+class _SosEmergencyNumbersSheetState extends State<_SosEmergencyNumbersSheet> {
+  static const Color _sosRed = Color(0xFFFF3B30);
+
+  late final TextEditingController _policeCtrl;
+  late final TextEditingController _ambulanceCtrl;
+  late final TextEditingController _fireCtrl;
+  final _formKey = GlobalKey<FormState>();
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _policeCtrl = TextEditingController(text: widget.policeNumber);
+    _ambulanceCtrl = TextEditingController(text: widget.ambulanceNumber);
+    _fireCtrl = TextEditingController(text: widget.fireNumber);
+  }
+
+  @override
+  void dispose() {
+    _policeCtrl.dispose();
+    _ambulanceCtrl.dispose();
+    _fireCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (widget.email == null) return;
+
+    setState(() => _saving = true);
+    try {
+      await ApiService.instance.updateEmergencyNumbers(widget.email!, {
+        'police_number': _policeCtrl.text.trim(),
+        'ambulance_number': _ambulanceCtrl.text.trim(),
+        'fire_number': _fireCtrl.text.trim(),
+      });
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: _sosRed,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: isDark
+                  ? const Color(0xFF16161C).withOpacity(0.90)
+                  : Colors.white.withOpacity(0.92),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(28)),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withOpacity(0.10)
+                    : Colors.white.withOpacity(0.70),
+              ),
+            ),
+            padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white24 : Colors.black12,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    'Edit Emergency Numbers',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.4,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  TextFormField(
+                    controller: _policeCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: widget.inputDecoration('Police', isDark),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _ambulanceCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: widget.inputDecoration('Ambulance', isDark),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _fireCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: widget.inputDecoration('Fire', isDark),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 22),
+                  _MorphButton(
+                    label: 'Save Numbers',
+                    isDark: isDark,
+                    filled: true,
+                    fillColor: _sosRed,
+                    loading: _saving,
+                    onTap: _saving ? null : _save,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
