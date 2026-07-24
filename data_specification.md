@@ -121,7 +121,9 @@ This document details the request bodies, query parameters, headers, and respons
     "dob": "1995-08-15",
     "gender": "Male",
     "height": 178.5,
-    "weight": 76.2
+    "weight": 76.2,
+    "has_disease": true,
+    "diseases": "Diabetes, Hypertension"
   },
   "goals": ["Weight Loss", "Daily Activity"],
   "permissions": {

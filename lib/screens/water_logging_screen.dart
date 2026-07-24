@@ -20,14 +20,13 @@ class WaterLog {
         ? amountRaw.round()
         : int.tryParse('$amountRaw') ?? 0;
     final idRaw = json['id'];
-    final id = idRaw is num
-        ? idRaw.toInt()
-        : int.tryParse('$idRaw');
+    final id = idRaw is num ? idRaw.toInt() : int.tryParse('$idRaw');
 
     return WaterLog(
       id: id,
       amount: amount,
-      timestamp: DateTime.tryParse(json['timestamp']?.toString() ?? '') ??
+      timestamp:
+          DateTime.tryParse(json['timestamp']?.toString() ?? '') ??
           DateTime.now(),
     );
   }
@@ -104,6 +103,30 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
     });
   }
 
+  void _logApiRequest({
+    required String name,
+    required String method,
+    required String url,
+    Object? body,
+  }) {
+    debugPrint("================ $name API REQUEST ================");
+    debugPrint("URL: $url");
+    debugPrint("Method: $method");
+    debugPrint("Headers: Authorization: Bearer [token]");
+    if (body != null) debugPrint("Body: $body");
+    debugPrint("=========================================================");
+  }
+
+  void _logApiResponse({required String name, Object? data, Object? error}) {
+    debugPrint("================ $name API RESPONSE ================");
+    if (error != null) {
+      debugPrint("Error: $error");
+    } else {
+      debugPrint("Response Body: $data");
+    }
+    debugPrint("==========================================================");
+  }
+
   Future<void> _fetchGraphData() async {
     if (!mounted) return;
     setState(() {
@@ -113,8 +136,19 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
 
     try {
       final email = await ApiService.instance.getUserEmail();
-      final resData = await ApiService.instance
-          .fetchWaterGraph(email, _selectedGraphPeriod);
+      final encodedEmail = Uri.encodeComponent(email);
+      final period = _selectedGraphPeriod;
+      final url =
+          '${ApiService.baseUrl}/api/water/graph/$encodedEmail?period=$period';
+
+      _logApiRequest(name: 'WATER GRAPH', method: 'GET', url: url);
+
+      final resData = await ApiService.instance.fetchWaterGraph(
+        email,
+        _selectedGraphPeriod,
+      );
+
+      _logApiResponse(name: 'WATER GRAPH', data: resData);
 
       // WaterGraphResponse: { period, data: [{ label, amount }] }
       dynamic raw = resData['data'];
@@ -146,6 +180,7 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
         _graphError = null;
       });
     } catch (e) {
+      _logApiResponse(name: 'WATER GRAPH', error: e);
       debugPrint("Error fetching water graph: $e");
       if (!mounted) return;
       setState(() {
@@ -165,8 +200,15 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
 
     try {
       final email = await ApiService.instance.getUserEmail();
+      final encodedEmail = Uri.encodeComponent(email);
+      final url = '${ApiService.baseUrl}/api/water/logs/$encodedEmail';
+
+      _logApiRequest(name: 'WATER LOGS', method: 'GET', url: url);
+
       // HydrationHistoryResponse: { water_intake_today, logs: WaterLogResponse[] }
       final resData = await ApiService.instance.fetchWaterLogs(email);
+
+      _logApiResponse(name: 'WATER LOGS', data: resData);
 
       final totalRaw = resData['water_intake_today'] ?? 0;
       final totalToday = totalRaw is num
@@ -181,15 +223,17 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
         _currentIntake = totalToday.toDouble();
         _startIntakeProgress = (_currentIntake / _waterGoal).clamp(0.0, 1.0);
         _targetIntakeProgress = _startIntakeProgress;
-        _waterLogs = logsJson
-            .whereType<Map>()
-            .map((x) => WaterLog.fromJson(Map<String, dynamic>.from(x)))
-            .toList()
-          ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+        _waterLogs =
+            logsJson
+                .whereType<Map>()
+                .map((x) => WaterLog.fromJson(Map<String, dynamic>.from(x)))
+                .toList()
+              ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
         _isLoadingLogs = false;
         _logsError = null;
       });
     } catch (e) {
+      _logApiResponse(name: 'WATER LOGS', error: e);
       debugPrint("Error fetching water logs: $e");
       if (!mounted) return;
       setState(() {
@@ -249,12 +293,16 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
       final newIntake = oldIntake + amount;
       _startIntakeProgress = (oldIntake / _waterGoal).clamp(0.0, 1.0);
       _targetIntakeProgress = (newIntake / _waterGoal).clamp(0.0, 1.0);
-      _levelAnimation = Tween<double>(
-        begin: _startIntakeProgress,
-        end: _targetIntakeProgress,
-      ).animate(
-        CurvedAnimation(parent: _levelController, curve: Curves.easeOutBack),
-      );
+      _levelAnimation =
+          Tween<double>(
+            begin: _startIntakeProgress,
+            end: _targetIntakeProgress,
+          ).animate(
+            CurvedAnimation(
+              parent: _levelController,
+              curve: Curves.easeOutBack,
+            ),
+          );
       setState(() => _currentIntake = newIntake);
       _levelController
         ..reset()
@@ -264,10 +312,23 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
     try {
       // POST /api/water/log/{email} — WaterLogCreate
       final email = await ApiService.instance.getUserEmail();
-      await ApiService.instance.addWaterLog(email, {
+      final encodedEmail = Uri.encodeComponent(email);
+      final body = {
         'amount': amount,
         'timestamp': DateTime.now().toUtc().toIso8601String(),
-      });
+      };
+      final url = '${ApiService.baseUrl}/api/water/log/$encodedEmail';
+
+      _logApiRequest(
+        name: 'WATER ADD LOG',
+        method: 'POST',
+        url: url,
+        body: body,
+      );
+
+      final resData = await ApiService.instance.addWaterLog(email, body);
+
+      _logApiResponse(name: 'WATER ADD LOG', data: resData);
 
       widget.onWaterLogged?.call();
       await _fetchLogs();
@@ -279,11 +340,13 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
           content: Text("Logged +$amount ml of water!"),
           backgroundColor: Colors.blueAccent,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       );
     } catch (e) {
+      _logApiResponse(name: 'WATER ADD LOG', error: e);
       debugPrint("Error syncing logged water to backend: $e");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -308,7 +371,17 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
 
     try {
       // DELETE /api/water/log/{log_id}
+      final url = '${ApiService.baseUrl}/api/water/log/${log.id}';
+
+      _logApiRequest(name: 'WATER DELETE LOG', method: 'DELETE', url: url);
+
       await ApiService.instance.deleteWaterLog(log.id!);
+
+      _logApiResponse(
+        name: 'WATER DELETE LOG',
+        data: {'status': 'ok', 'deleted_id': log.id},
+      );
+
       await HealthService.instance.updateLocalWaterIntake(
         -log.amount.toDouble(),
       );
@@ -325,6 +398,7 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
         ),
       );
     } catch (e) {
+      _logApiResponse(name: 'WATER DELETE LOG', error: e);
       debugPrint("Error deleting log: $e");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -350,8 +424,9 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
       builder: (context) {
         return AlertDialog(
           backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           title: const Text(
             "Edit Water Log",
             style: TextStyle(fontWeight: FontWeight.w900),
@@ -362,8 +437,10 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
             autofocus: true,
             decoration: InputDecoration(
               hintText: "Enter amount (ml)",
-              prefixIcon:
-                  const Icon(Icons.water_drop, color: Colors.blueAccent),
+              prefixIcon: const Icon(
+                Icons.water_drop,
+                color: Colors.blueAccent,
+              ),
               filled: true,
               fillColor: isDark
                   ? Colors.white.withOpacity(0.06)
@@ -409,14 +486,27 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
 
     try {
       // PUT /api/water/log/{log_id} — WaterLogCreate body
-      final result = await ApiService.instance.updateWaterLog(log.id!, {
+      final body = {
         'amount': newAmount,
         'timestamp': log.timestamp.toUtc().toIso8601String(),
-      });
+      };
+      final url = '${ApiService.baseUrl}/api/water/log/${log.id}';
+
+      _logApiRequest(
+        name: 'WATER UPDATE LOG',
+        method: 'PUT',
+        url: url,
+        body: body,
+      );
+
+      final result = await ApiService.instance.updateWaterLog(log.id!, body);
+
+      _logApiResponse(name: 'WATER UPDATE LOG', data: result);
 
       // Prefer server values when present
       final serverAmount = (result['amount'] as num?)?.round() ?? newAmount;
-      final serverTs = DateTime.tryParse(result['timestamp']?.toString() ?? '') ??
+      final serverTs =
+          DateTime.tryParse(result['timestamp']?.toString() ?? '') ??
           log.timestamp;
 
       final delta = (serverAmount - log.amount).toDouble();
@@ -446,6 +536,7 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
         ),
       );
     } catch (e) {
+      _logApiResponse(name: 'WATER UPDATE LOG', error: e);
       debugPrint("Error updating log: $e");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -965,7 +1056,11 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
           const SizedBox(height: 8),
           Text(
             "Period: day · week · month",
-            style: TextStyle(fontSize: 11, color: muted, fontWeight: FontWeight.w500),
+            style: TextStyle(
+              fontSize: 11,
+              color: muted,
+              fontWeight: FontWeight.w500,
+            ),
           ),
           const SizedBox(height: 16),
           if (_isLoadingGraph)
@@ -1089,16 +1184,18 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
                     SizedBox(
                       width: 48,
                       child: Padding(
-                        padding: const EdgeInsets.only(right: 6, top: 4, bottom: 28),
+                        padding: const EdgeInsets.only(
+                          right: 6,
+                          top: 4,
+                          bottom: 28,
+                        ),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             for (final t in [1.0, 0.75, 0.5, 0.25, 0.0])
                               Text(
-                                t == 0
-                                    ? "0"
-                                    : "${(maxAmount * t).round()}",
+                                t == 0 ? "0" : "${(maxAmount * t).round()}",
                                 style: const TextStyle(
                                   fontSize: 8,
                                   color: Colors.grey,
@@ -1278,7 +1375,9 @@ class _WaterLoggingScreenState extends State<WaterLoggingScreen>
       } catch (_) {
         final parts = label.split('T');
         if (parts.length > 1 && parts[1].length >= 5) {
-          return dense ? '${parts[1].substring(0, 2)}h' : parts[1].substring(0, 5);
+          return dense
+              ? '${parts[1].substring(0, 2)}h'
+              : parts[1].substring(0, 5);
         }
       }
     }

@@ -34,9 +34,12 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   final TextEditingController _dobController = TextEditingController();
   final TextEditingController _heightController = TextEditingController();
   final TextEditingController _weightController = TextEditingController();
+  final TextEditingController _diseaseController = TextEditingController();
 
   // State Variables
   String _gender = 'Female';
+  /// null until user answers; true if they have medical conditions
+  bool? _hasDisease;
   final List<String> _selectedGoals = [];
   bool _healthConnected = false;
 
@@ -81,6 +84,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     _dobController.dispose();
     _heightController.dispose();
     _weightController.dispose();
+    _diseaseController.dispose();
     super.dispose();
   }
 
@@ -190,6 +194,10 @@ class _OnboardingScreenState extends State<OnboardingScreen>
         'gender': _gender,
         'height': double.tryParse(_heightController.text),
         'weight': double.tryParse(_weightController.text),
+        'has_disease': _hasDisease ?? false,
+        'diseases': (_hasDisease == true)
+            ? _diseaseController.text.trim()
+            : null,
       },
       'goals': _selectedGoals,
       'permissions': {
@@ -507,9 +515,19 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                         dobController: _dobController,
                         heightController: _heightController,
                         weightController: _weightController,
+                        diseaseController: _diseaseController,
                         gender: _gender,
                         onGenderChanged: (val) {
                           if (val != null) setState(() => _gender = val);
+                        },
+                        hasDisease: _hasDisease,
+                        onHasDiseaseChanged: (value) {
+                          setState(() {
+                            _hasDisease = value;
+                            if (!value) {
+                              _diseaseController.clear();
+                            }
+                          });
                         },
                         onBack: _prevPage,
                         onNext: _nextPage,

@@ -276,10 +276,19 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
     }
   }
 
-  Future<void> _handleCheckout() async {
-    setState(() {
-      _isLoading = true;
-    });
+  /// Returns `true` when checkout succeeded.
+  ///
+  /// [useGlobalLoading] — full-screen overlay on the gym page.
+  /// [popScreenOnSuccess] — pop the gym screen after a successful checkout.
+  Future<bool> _handleCheckout({
+    bool useGlobalLoading = true,
+    bool popScreenOnSuccess = true,
+  }) async {
+    if (useGlobalLoading) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
 
     try {
       final token = await AuthService.instance.getAccessToken();
@@ -351,8 +360,11 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
               backgroundColor: Colors.green,
             ),
           );
-          Navigator.pop(context);
+          if (popScreenOnSuccess) {
+            Navigator.pop(context);
+          }
         }
+        return true;
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -362,6 +374,7 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
             ),
           );
         }
+        return false;
       }
     } catch (e) {
       debugPrint("Error in gym checkout: $e");
@@ -373,14 +386,19 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
           ),
         );
       }
+      return false;
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (useGlobalLoading && mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
-  void _showAddExerciseSheet() {
+  /// [onChanged] is invoked after an exercise is added so a parent sheet
+  /// (e.g. checkout confirmation) can rebuild without being closed.
+  void _showAddExerciseSheet({VoidCallback? onChanged}) {
     String? selectedName;
     int sets = 3;
     final customNameController = TextEditingController();
@@ -389,7 +407,7 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
+      builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
             final theme = Theme.of(context);
@@ -547,7 +565,10 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
                           _loggedExercises.add({"name": name, "sets": sets});
                         });
                         _saveLoggedExercises();
-                        Navigator.pop(context);
+                        // Notify parent sheet (checkout) so its list refreshes.
+                        onChanged?.call();
+                        // Only close this add-exercise sheet — leave checkout sheet open.
+                        Navigator.pop(sheetContext);
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
@@ -569,131 +590,214 @@ class _GymCheckinScreenState extends State<GymCheckinScreen> with TickerProvider
   }
 
   void _showCheckoutConfirmationSheet() {
+    bool isCheckingOut = false;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      // Keep sheet under user control; PopScope blocks dismiss while API runs.
+      isDismissible: true,
+      enableDrag: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
+      builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setCheckoutState) {
             final theme = Theme.of(context);
             final isDark = theme.brightness == Brightness.dark;
 
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E1E24) : Colors.white,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        "Log Gym Workout & Checkout",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: isDark ? Colors.white : Colors.black87,
+            return PopScope(
+              canPop: !isCheckingOut,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E1E24) : Colors.white,
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            "Log Gym Workout & Checkout",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
                         ),
-                      ),
-                      TextButton.icon(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          _showAddExerciseSheet();
-                        },
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text("Add", style: TextStyle(fontSize: 12)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  if (_loggedExercises.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 24),
-                      child: Center(
-                        child: Text(
-                          "No exercises added. Tap 'Add' to log a workout!",
-                          style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                        TextButton.icon(
+                          // Keep checkout sheet open; stack add sheet on top.
+                          onPressed: isCheckingOut
+                              ? null
+                              : () {
+                                  _showAddExerciseSheet(
+                                    onChanged: () {
+                                      setCheckoutState(() {});
+                                    },
+                                  );
+                                },
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text("Add", style: TextStyle(fontSize: 12)),
                         ),
-                      ),
-                    )
-                  else
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 250),
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: _loggedExercises.length,
-                        itemBuilder: (context, index) {
-                          final item = _loggedExercises[index];
-                          return Card(
-                            color: isDark ? Colors.white.withOpacity(0.04) : Colors.black.withOpacity(0.02),
-                            elevation: 0,
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            child: ListTile(
-                              title: Text(
-                                item['name'],
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                  color: isDark ? Colors.white : Colors.black87,
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (_loggedExercises.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24),
+                        child: Center(
+                          child: Text(
+                            "No exercises added. Tap 'Add' to log a workout!",
+                            style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                          ),
+                        ),
+                      )
+                    else
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 250),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: _loggedExercises.length,
+                          itemBuilder: (context, index) {
+                            final item = _loggedExercises[index];
+                            return Card(
+                              color: isDark
+                                  ? Colors.white.withOpacity(0.04)
+                                  : Colors.black.withOpacity(0.02),
+                              elevation: 0,
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10)),
+                              child: ListTile(
+                                title: Text(
+                                  item['name'],
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: isDark ? Colors.white : Colors.black87,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  "${item['sets']} sets",
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Colors.grey),
+                                ),
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.delete_outline,
+                                      color: Colors.redAccent, size: 18),
+                                  onPressed: isCheckingOut
+                                      ? null
+                                      : () {
+                                          setCheckoutState(() {
+                                            _loggedExercises.removeAt(index);
+                                          });
+                                          setState(() {});
+                                          _saveLoggedExercises();
+                                        },
                                 ),
                               ),
-                              subtitle: Text(
-                                "${item['sets']} sets",
-                                style: const TextStyle(fontSize: 12, color: Colors.grey),
-                              ),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
-                                onPressed: () {
-                                  setCheckoutState(() {
-                                    _loggedExercises.removeAt(index);
-                                  });
-                                  setState(() {});
-                                  _saveLoggedExercises();
-                                },
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text("Go Back"),
+                            );
+                          },
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blueAccent,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    const SizedBox(height: 24),
+                    if (isCheckingOut) ...[
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.only(bottom: 16),
+                          child: Column(
+                            children: [
+                              SizedBox(
+                                width: 28,
+                                height: 28,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: Colors.blueAccent,
+                                ),
+                              ),
+                              SizedBox(height: 10),
+                              Text(
+                                "Checking out… please wait",
+                                style: TextStyle(fontSize: 13, color: Colors.grey),
+                              ),
+                            ],
                           ),
-                          onPressed: () {
-                            Navigator.pop(context);
-                            _handleCheckout();
-                          },
-                          child: const Text("Checkout & Log", style: TextStyle(fontWeight: FontWeight.bold)),
                         ),
                       ),
                     ],
-                  ),
-                ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                            onPressed: isCheckingOut
+                                ? null
+                                : () => Navigator.pop(sheetContext),
+                            child: const Text("Go Back"),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blueAccent,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                            // Keep sheet open until checkout API finishes.
+                            onPressed: isCheckingOut
+                                ? null
+                                : () async {
+                                    setCheckoutState(() {
+                                      isCheckingOut = true;
+                                    });
+
+                                    final sheetNav = Navigator.of(sheetContext);
+                                    final pageNav = Navigator.of(this.context);
+
+                                    final success = await _handleCheckout(
+                                      useGlobalLoading: false,
+                                      popScreenOnSuccess: false,
+                                    );
+
+                                    if (!mounted) return;
+
+                                    if (success) {
+                                      // Close checkout sheet, then leave gym screen.
+                                      if (sheetNav.canPop()) {
+                                        sheetNav.pop();
+                                      }
+                                      if (pageNav.canPop()) {
+                                        pageNav.pop();
+                                      }
+                                    } else {
+                                      // Stay on sheet so user can retry.
+                                      setCheckoutState(() {
+                                        isCheckingOut = false;
+                                      });
+                                    }
+                                  },
+                            child: Text(
+                              isCheckingOut ? "Checking out…" : "Checkout & Log",
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             );
           },

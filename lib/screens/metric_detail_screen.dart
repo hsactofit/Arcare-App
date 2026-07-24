@@ -275,12 +275,6 @@ class _MetricDetailScreenState extends State<MetricDetailScreen>
                           ),
                         ),
                         const SizedBox(width: 12),
-                        const CircleAvatar(
-                          radius: 18,
-                          backgroundImage: NetworkImage(
-                            "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150",
-                          ),
-                        ),
                       ],
                     ),
                   ),

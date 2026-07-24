@@ -3090,15 +3090,20 @@ class DashboardScreenState extends State<DashboardScreen>
     String icon,
     Color color,
   ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final jsonStr = prefs.getString('onboarding_data');
-    String email = "testuser@arcar.com";
-    if (jsonStr != null) {
-      final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
-      final storedEmail = onboarding['auth']?['email'];
-      if (storedEmail != null) {
-        email = storedEmail;
-      }
+    final String email;
+    try {
+      email = await ApiService.instance.getUserEmail();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.toString().replaceFirst('Exception: ', ''),
+          ),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
     }
 
     if (!mounted) return;

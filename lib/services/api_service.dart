@@ -92,20 +92,32 @@ class ApiService {
     return response;
   }
 
-  /// Fetch user's email from onboarding state.
+  /// Fetch the signed-in user's email (onboarding data → prefs → Firebase).
   Future<String> getUserEmail() async {
     final prefs = await SharedPreferences.getInstance();
+
     final jsonStr = prefs.getString('onboarding_data');
     if (jsonStr != null) {
       try {
         final Map<String, dynamic> onboarding = jsonDecode(jsonStr);
-        final email = onboarding['auth']?['email'];
-        if (email != null) {
+        final email = onboarding['auth']?['email']?.toString().trim();
+        if (email != null && email.isNotEmpty) {
           return email;
         }
       } catch (_) {}
     }
-    return "testuser@arcar.com";
+
+    final storedEmail = prefs.getString('user_email')?.trim();
+    if (storedEmail != null && storedEmail.isNotEmpty) {
+      return storedEmail;
+    }
+
+    final firebaseEmail = AuthService.instance.currentUser?.email?.trim();
+    if (firebaseEmail != null && firebaseEmail.isNotEmpty) {
+      return firebaseEmail;
+    }
+
+    throw Exception('User email not found. Please sign in again.');
   }
 
   /// GET /api/health/data/{email} (Trends Data)
@@ -733,6 +745,89 @@ class ApiService {
     if (response.statusCode != 200) {
       throw Exception(
           "Failed to delete nutrition plan: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  // ─── Health Chatbot ───────────────────────────────────────────────────────
+
+  /// POST /api/chatbot/{email}
+  ///
+  /// Sends a message to the health coach. Pass [conversationId] to continue a
+  /// thread, or set [newConversation] to start a fresh one.
+  Future<Map<String, dynamic>> sendChatMessage({
+    required String email,
+    required String message,
+    int? conversationId,
+    bool newConversation = false,
+  }) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final body = <String, dynamic>{
+      'message': message,
+      if (conversationId != null) 'conversation_id': conversationId,
+      if (newConversation) 'new_conversation': true,
+    };
+    final response = await _post('/api/chatbot/$encodedEmail', body: body);
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Chat failed: ${response.statusCode} - ${response.body}");
+  }
+
+  /// GET /api/chatbot/{email}/conversations
+  Future<Map<String, dynamic>> listChatConversations(
+    String email, {
+    int limit = 20,
+  }) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get(
+      '/api/chatbot/$encodedEmail/conversations',
+      queryParams: {'limit': limit.toString()},
+    );
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Failed to list conversations: ${response.statusCode} - ${response.body}");
+  }
+
+  /// GET /api/chatbot/{email}/conversations/{conversationId}
+  Future<Map<String, dynamic>> getChatHistory(
+    String email,
+    int conversationId, {
+    int limit = 100,
+  }) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _get(
+      '/api/chatbot/$encodedEmail/conversations/$conversationId',
+      queryParams: {'limit': limit.toString()},
+    );
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    }
+    throw Exception(
+        "Failed to load chat history: ${response.statusCode} - ${response.body}");
+  }
+
+  /// DELETE /api/chatbot/{email}/conversations/{conversationId}
+  Future<void> deleteChatConversation(String email, int conversationId) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response = await _delete(
+        '/api/chatbot/$encodedEmail/conversations/$conversationId');
+    if (response.statusCode != 200) {
+      throw Exception(
+          "Failed to delete conversation: ${response.statusCode} - ${response.body}");
+    }
+  }
+
+  /// DELETE /api/chatbot/{email}/conversations
+  Future<void> clearAllChatConversations(String email) async {
+    final encodedEmail = Uri.encodeComponent(email);
+    final response =
+        await _delete('/api/chatbot/$encodedEmail/conversations');
+    if (response.statusCode != 200) {
+      throw Exception(
+          "Failed to clear conversations: ${response.statusCode} - ${response.body}");
     }
   }
 }

@@ -7,8 +7,12 @@ class ProfileStep extends StatefulWidget {
   final TextEditingController dobController;
   final TextEditingController heightController;
   final TextEditingController weightController;
+  final TextEditingController diseaseController;
   final String gender;
   final ValueChanged<String?> onGenderChanged;
+  /// null = not answered yet, true = has disease(s), false = no disease
+  final bool? hasDisease;
+  final ValueChanged<bool> onHasDiseaseChanged;
   final VoidCallback onBack;
   final VoidCallback onNext;
 
@@ -18,8 +22,11 @@ class ProfileStep extends StatefulWidget {
     required this.dobController,
     required this.heightController,
     required this.weightController,
+    required this.diseaseController,
     required this.gender,
     required this.onGenderChanged,
+    required this.hasDisease,
+    required this.onHasDiseaseChanged,
     required this.onBack,
     required this.onNext,
   });
@@ -167,9 +174,83 @@ class _ProfileStepState extends State<ProfileStep> with SingleTickerProviderStat
                   ),
                 ),
 
-                // Optional details header
+                // Medical conditions / diseases
+                FadeSlideTransition(
+                  delay: const Duration(milliseconds: 500),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(left: 4.0, bottom: 8.0),
+                        child: Text(
+                          "Do you have any medical conditions?",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: isDark ? Colors.white.withOpacity(0.8) : Colors.black87,
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          _buildYesNoCard(
+                            label: "No",
+                            emoji: "✅",
+                            isSelected: widget.hasDisease == false,
+                            isDark: isDark,
+                            onTap: () => widget.onHasDiseaseChanged(false),
+                          ),
+                          const SizedBox(width: 10),
+                          _buildYesNoCard(
+                            label: "Yes",
+                            emoji: "🩺",
+                            isSelected: widget.hasDisease == true,
+                            isDark: isDark,
+                            onTap: () => widget.onHasDiseaseChanged(true),
+                          ),
+                        ],
+                      ),
+                      if (widget.hasDisease == true) ...[
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          controller: widget.diseaseController,
+                          textCapitalization: TextCapitalization.sentences,
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                          ),
+                          decoration: _inputDecoration(
+                            "What condition(s)? (e.g. Diabetes)",
+                            Icons.medical_services_outlined,
+                            isDark,
+                          ),
+                          validator: (v) {
+                            if (widget.hasDisease == true &&
+                                (v == null || v.trim().isEmpty)) {
+                              return "Please specify your medical condition";
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
                 FadeSlideTransition(
                   delay: const Duration(milliseconds: 550),
+                  child: Column(
+                    children: [
+                      Divider(height: 20, color: isDark ? Colors.white10 : Colors.black12),
+                      const SizedBox(height: 10),
+                    ],
+                  ),
+                ),
+
+                // Optional details header
+                FadeSlideTransition(
+                  delay: const Duration(milliseconds: 600),
                   child: Text(
                     "Optional Details",
                     style: TextStyle(
@@ -181,7 +262,7 @@ class _ProfileStepState extends State<ProfileStep> with SingleTickerProviderStat
                 ),
                 const SizedBox(height: 12),
                 FadeSlideTransition(
-                  delay: const Duration(milliseconds: 650),
+                  delay: const Duration(milliseconds: 700),
                   child: Column(
                     children: [
                       TextFormField(
@@ -211,7 +292,7 @@ class _ProfileStepState extends State<ProfileStep> with SingleTickerProviderStat
                 const SizedBox(height: 30),
 
                 FadeSlideTransition(
-                  delay: const Duration(milliseconds: 750),
+                  delay: const Duration(milliseconds: 800),
                   child: Row(
                     children: [
                       Expanded(
@@ -237,6 +318,17 @@ class _ProfileStepState extends State<ProfileStep> with SingleTickerProviderStat
                             elevation: 4,
                           ),
                           onPressed: () {
+                            if (widget.hasDisease == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    "Please tell us if you have any medical conditions",
+                                  ),
+                                  backgroundColor: Colors.orange,
+                                ),
+                              );
+                              return;
+                            }
                             if (widget.formKey.currentState!.validate()) {
                               widget.onNext();
                             }
@@ -290,6 +382,57 @@ class _ProfileStepState extends State<ProfileStep> with SingleTickerProviderStat
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                     color: isSelected 
                         ? Colors.blueAccent 
+                        : (isDark ? Colors.white.withOpacity(0.8) : Colors.black.withOpacity(0.75)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildYesNoCard({
+    required String label,
+    required String emoji,
+    required bool isSelected,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedScale(
+          scale: isSelected ? 1.03 : 1.0,
+          duration: const Duration(milliseconds: 150),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? Colors.blueAccent.withOpacity(0.20)
+                  : (isDark ? Colors.white.withOpacity(0.07) : Colors.black.withOpacity(0.035)),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isSelected
+                    ? Colors.blueAccent
+                    : (isDark ? Colors.white.withOpacity(0.18) : Colors.black.withOpacity(0.10)),
+                width: isSelected ? 2.0 : 1.2,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(emoji, style: const TextStyle(fontSize: 20)),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    color: isSelected
+                        ? Colors.blueAccent
                         : (isDark ? Colors.white.withOpacity(0.8) : Colors.black.withOpacity(0.75)),
                   ),
                 ),
